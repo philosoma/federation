@@ -125,10 +125,11 @@ func (r *Runner) runSend(them, name string, topics []string, by string) {
 		}
 		r.sends[them] = res
 		r.mu.Unlock()
-		r.release()
 		r.log.Info("release changed", "them", them, "topics", topics, "status", res.Status, "by", by)
-		// Refresh the status clone so the page shows the new choice at once.
+		// Refresh the status clone before the page stops showing "Applying",
+		// or it redraws the old choice from the stale clone.
 		r.measure(context.Background())
+		r.release()
 	}()
 
 	work := filepath.Join(r.root, "work", them)

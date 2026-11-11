@@ -471,11 +471,17 @@ input:focus, select:focus { outline: 2px solid var(--green-hi); outline-offset: 
 .new-btn { font-size: .85em; padding: 5px 12px; }
 
 /* What we send, on a partner's card */
-.send-form { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.send { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.send summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .5em; list-style: none; font-size: .9em; user-select: none; }
+.send summary::-webkit-details-marker { display: none; }
+.send summary::before { content: "▸"; color: var(--fog-2); width: .8em; }
+.send[open] summary::before { content: "▾"; }
+.send-sum { color: var(--fog-0); }
+.send-form { margin-top: 10px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .send-form fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
-.send-form legend { color: var(--fog-2); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 6px; padding: 0; }
-.send-form .topic { display: flex; align-items: flex-start; gap: .6em; font-size: .92em; color: var(--fog-0); cursor: pointer; }
-.send-form .topic input { margin-top: .2em; accent-color: var(--green-mid); }
+.send-form .topic { display: flex; align-items: flex-start; gap: .6em; text-align: left; font-size: .92em; color: var(--fog-0); cursor: pointer; }
+.send-form .topic input { flex: none; width: 17px; height: 17px; margin: 2px 0 0; padding: 0; accent-color: var(--green-mid); }
 .send-form .topic small { display: block; color: var(--fog-2); font-size: .85em; }
 .send-form fieldset:disabled .topic { cursor: not-allowed; opacity: .6; }
 .send-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; font-size: .85em; }

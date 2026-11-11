@@ -369,6 +369,8 @@ type sendView struct {
 	Failed   string // the last change failed: why
 	Done     string // the last change: when and by whom
 	Busy     bool   // something else is running: the boxes can't be saved
+	Summary  string // what goes now, for the closed box: "Sentry turret, Sat tracker"
+	Open     bool   // start open: applying, or the last change failed
 }
 
 type topicBox struct {
@@ -496,6 +498,15 @@ func (s *server) sendView(them, name string, plan runner.ReleasePlan, busy strin
 	on := plan.Send[them]
 	for _, t := range plan.Topics {
 		v.Topics = append(v.Topics, topicBox{ID: t.ID, Name: t.Name, Detail: t.Detail, On: slices.Contains(on, t.ID)})
+		if slices.Contains(on, t.ID) {
+			if v.Summary != "" {
+				v.Summary += ", "
+			}
+			v.Summary += t.Name
+		}
+	}
+	if v.Summary == "" {
+		v.Summary = "nothing"
 	}
 	if res, ok := s.run.LastSend(them); ok {
 		if res.Status == store.StatusFailed {
@@ -504,6 +515,7 @@ func (s *server) sendView(them, name string, plan runner.ReleasePlan, busy strin
 			v.Done = "Changed " + ago(time.Now(), res.At) + " by " + res.By
 		}
 	}
+	v.Open = v.Applying || v.Failed != ""
 	return v
 }
 

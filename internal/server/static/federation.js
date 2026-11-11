@@ -82,6 +82,17 @@
     });
   });
 
+  // Keep each "What we send" box open or closed across the page's reloads.
+  document.querySelectorAll("details.send").forEach(function (d) {
+    var k = "fd-" + d.id;
+    try {
+      var v = sessionStorage.getItem(k);
+      if (v === "1") d.open = true;
+      if (v === "0" && !d.querySelector("[data-applying]")) d.open = false;
+    } catch (e) {}
+    d.addEventListener("toggle", function () { try { sessionStorage.setItem(k, d.open ? "1" : "0"); } catch (e) {} });
+  });
+
   // The Status view: the links are measured every minute, so follow them, but
   // not over boxes someone is changing. While a change applies, check often.
   if (document.querySelector(".link-cards")) {

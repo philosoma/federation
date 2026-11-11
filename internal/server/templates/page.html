@@ -67,10 +67,12 @@
     </dl>
     {{range .Problems}}<div class="note">{{.}}</div>{{end}}
     {{with .Send}}{{$s := .}}
+    <details class="send" id="send-{{.Them}}"{{if .Open}} open{{end}}>
+    <summary><span class="kicker">What we send</span> <span class="send-sum">{{.Summary}}</span>{{if .Applying}} <span class="badge info">Applying…</span>{{end}}{{if .Failed}} <span class="badge err">Last change failed</span>{{end}}</summary>
     <form class="send-form" method="post" action="/send" data-name="{{.Name}}"{{if .Applying}} data-applying{{end}}>
       <input type="hidden" name="n" value="{{.Them}}">
       <fieldset{{if or .Applying .Busy}} disabled{{end}}>
-        <legend>What we send</legend>
+        <legend class="visually-hidden">Topics sent to {{.Name}}</legend>
         {{range .Topics}}<label class="topic"><input type="checkbox" name="topic" value="{{.ID}}"{{if .On}} checked{{end}}><span>{{.Name}}{{with .Detail}}<small>{{.}}</small>{{end}}</span></label>
         {{else}}<p class="hint">No topics in the release file yet.</p>{{end}}
       </fieldset>
@@ -82,6 +84,7 @@
         {{if .Busy}}<span class="hint">A phase is running: changes wait until it ends.</span>{{end}}
       </div>
     </form>
+    </details>
     {{end}}
     {{end}}
     <div class="link-actions">
