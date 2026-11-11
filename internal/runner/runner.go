@@ -118,17 +118,19 @@ func (r *Runner) Busy() string {
 // CanRun says whether a phase may start: every earlier phase that isn't
 // optional has passed.
 func CanRun(p *store.Peering, phaseID string) (bool, string) {
-	i, ph := Lookup(phaseID)
-	list := PhasesFor(p.Method)
-	if i < 0 || i >= len(list) || list[i].ID != ph.ID {
-		return false, "unknown phase"
+	i, _ := Lookup(phaseID)
+	if i < 0 {
+		return false, "unknown step"
 	}
-	for _, ph := range list[:i] {
+	if p.Method != store.MethodGoatbuilder {
+		return false, "This peering was set up with the earlier method. Start it again with goatbuilder to run steps here."
+	}
+	for _, ph := range Phases[:i] {
 		if ph.Optional {
 			continue
 		}
 		if run := p.Runs[ph.ID]; run == nil || run.Status != store.StatusPassed {
-			return false, fmt.Sprintf("Phase %s has to pass first.", ph.Num)
+			return false, fmt.Sprintf("Finish \"%s\" first.", ph.Title)
 		}
 	}
 	return true, ""
@@ -203,7 +205,7 @@ func (r *Runner) Tail(them, phaseID string, n int64) string {
 }
 
 var (
-	showLine     = regexp.MustCompile(`^::show ([a-z_]+)=(.*)$`)
+	showLine     = regexp.MustCompile(`^::show ([a-z0-9_]+)=(.*)$`)
 	progressLine = regexp.MustCompile(`^::progress (\d+)/(\d+) ?(.*)$`)
 )
 
@@ -252,6 +254,7 @@ func (r *Runner) run(p store.Peering, ph *Phase, by string) {
 	cmd := exec.CommandContext(ctx, "bash", filepath.Join(r.root, "scripts", ph.Script))
 	cmd.Dir = work
 	cmd.Env = append(append([]string{}, r.env...), r.peeringEnv(&p, work)...)
+	cmd.Env = append(cmd.Env, "FED_PHASE="+ph.ID, "FED_OTHERS_EXCHANGING="+r.othersExchanging(p.Them))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	pr, pw := io.Pipe()
@@ -346,20 +349,14 @@ func (r *Runner) peeringEnv(p *store.Peering, work string) []string {
 	if run := p.Runs["g2"]; run != nil && run.Confirm != nil && run.Confirm["their_key"] != "" {
 		env = append(env, "FED_THEIR_KEY="+run.Confirm["their_key"])
 	}
-	if run := p.Runs["g2"]; run != nil && run.Outputs["their_ca"] != "" {
-		env = append(env, "FED_THEIR_CA="+run.Outputs["their_ca"])
+	if run := p.Runs["g2"]; run != nil && run.Outputs["raw_their_ca"] != "" {
+		env = append(env, "FED_THEIR_CA="+run.Outputs["raw_their_ca"])
 	}
 	if run := p.Runs["g3"]; run != nil && run.Status == store.StatusPassed {
-		env = append(env, "FED_DIGEST="+run.Outputs["digest"])
+		env = append(env, "FED_DIGEST="+run.Outputs["raw_digest"])
 	}
 	if run := p.Runs["g4"]; run != nil && run.Status == store.StatusPassed {
-		env = append(env, "FED_PLAN_HASH="+run.Outputs["plan_hash"], "FED_ADMISSION_DIGEST="+run.Outputs["admission_digest"])
-	}
-	if run := p.Runs["p5"]; run != nil && run.Confirm != nil {
-		// Older records typed their key in; newer ones confirm the one fetched.
-		if k := run.Confirm["their_key"]; k != "" {
-			env = append(env, "FED_THEIR_KEY="+k)
-		}
+		env = append(env, "FED_PLAN_HASH="+run.Outputs["raw_plan_hash"], "FED_ADMISSION_DIGEST="+run.Outputs["raw_admission_digest"])
 	}
 	return env
 }
@@ -407,4 +404,21 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// othersExchanging names our other peerings whose package exchange is open
+// (exchanged, agreement not yet confirmed). The directory holds one package per
+// party, so a second exchange would replace the first one's package.
+func (r *Runner) othersExchanging(them string) string {
+	var out []string
+	for _, p := range r.st.List() {
+		if p.Them == them || p.Method != store.MethodGoatbuilder {
+			continue
+		}
+		g2, g3 := p.Runs["g2"], p.Runs["g3"]
+		if g2 != nil && g2.Status != "" && (g3 == nil || g3.Status != store.StatusPassed) {
+			out = append(out, p.Them)
+		}
+	}
+	return strings.Join(out, " ")
 }

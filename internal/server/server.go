@@ -81,6 +81,7 @@ func New(cfg Config, st *store.Store, run *runner.Runner, version string, log *s
 	app.HandleFunc("POST /listen", s.handleListen)
 	app.HandleFunc("POST /send", s.handleSend)
 	app.HandleFunc("POST /backout", s.handleBackout)
+	app.HandleFunc("POST /restart", s.handleRestart)
 	app.HandleFunc("GET /log", s.handleLog)
 	app.Handle("GET /static/", http.StripPrefix("/static/", cacheStatic(http.FileServerFS(static))))
 
@@ -179,6 +180,8 @@ type pageData struct {
 	Done, Total                        int
 	CanChangeListener                  bool
 	Backout                            *backoutView
+	Legacy, LegacyDone, AllDone        bool
+	StepNow                            int
 	GB                                 *runner.GBStatus
 	Endpoint                           *runner.Endpoint
 	Now                                time.Time
@@ -206,7 +209,19 @@ type row struct {
 	Finished                 time.Time
 	By                       string
 	Progress                 *progressView
+	Index                    int  // 1-based position
+	Done, Current, Locked    bool // finished; the one to do now; waiting on an earlier step
+	Summary                  string
+	Verb                     string // the run button's label
+	ConfirmText              string // a confirm dialog before running
+	Checks                   []checkRow
+	Plan                     *runner.PlanView
+	Acc                      *runner.AcceptanceView
+	Explain                  string
 }
+
+// checkRow is one line of the readiness list: ok, warn or fail.
+type checkRow struct{ State, Name, Detail string }
 
 type progressView struct {
 	N       int    `json:"n"`
@@ -245,7 +260,7 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 	if want == "" && !showNew {
 		showNew = true
 		for i := range list {
-			if _, done, total := s.rows(&list[i], ""); done < total {
+			if _, done, total := s.rows(&list[i], ""); done < total && list[i].Method == store.MethodGoatbuilder {
 				showNew = false
 				break
 			}
@@ -262,6 +277,13 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.Sel != nil {
 		d.Rows, d.Done, d.Total = s.rows(d.Sel, d.Busy)
+		d.Legacy = d.Sel.Method != store.MethodGoatbuilder
+		d.AllDone = !d.Legacy && d.Done == d.Total
+		d.StepNow = min(d.Done+1, d.Total)
+		if d.Legacy {
+			run := d.Sel.Runs["p14"]
+			d.LegacyDone = run != nil && run.Status == store.StatusPassed
+		}
 		if d.Sel.Method == store.MethodGoatbuilder {
 			b := &backoutView{Running: d.Busy == d.Sel.Them+"/"+runner.BackoutPhase, Busy: d.Busy != ""}
 			if res, ok := s.run.LastBackout(d.Sel.Them); ok {
@@ -273,7 +295,7 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 				d.GB = &g
 			}
 		}
-		p5 := d.Sel.Runs["p5"]
+		p5 := d.Sel.Runs["g2"]
 		d.CanChangeListener = d.Busy == "" && (p5 == nil || p5.Status != store.StatusPassed)
 		if d.Sel.WeListen && s.cfg.PublicName != "" {
 			if ep, ok := s.run.EndpointFor(d.Sel.Them, s.cfg.PublicName); ok {
@@ -285,7 +307,7 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total int) {
-	for _, ph := range runner.PhasesFor(p.Method) {
+	for _, ph := range runner.Phases {
 		run := p.Runs[ph.ID]
 		if run == nil {
 			run = &store.Run{}
@@ -293,8 +315,19 @@ func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total in
 		rw := row{Phase: ph, Status: run.Status, Note: run.Note, Finished: run.Finished, By: run.By}
 		rw.Chip, rw.StatusText = chip(run.Status)
 		rw.Partner = p.Name
+		rw.Index, rw.ConfirmText, rw.Summary = len(rows)+1, ph.Confirm, run.Outputs["summary"]
+		rw.Done = run.Status == store.StatusPassed
+		rw.Verb = "Run"
+		if ph.ID == "ready" {
+			rw.Verb = "Check"
+		}
 		for _, k := range sortedKeys(run.Outputs) {
 			switch {
+			case k == "summary" || strings.HasPrefix(k, "raw_"):
+			case strings.HasPrefix(k, "check_"):
+				if f := strings.SplitN(run.Outputs[k], "|", 3); len(f) == 3 {
+					rw.Checks = append(rw.Checks, checkRow{f[0], f[1], f[2]})
+				}
 			case strings.HasPrefix(k, "our_"):
 				rw.Ours = append(rw.Ours, kv{k, run.Outputs[k]})
 			case strings.HasPrefix(k, "their_"):
@@ -322,6 +355,19 @@ func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total in
 			rw.Log = s.run.Tail(p.Them, ph.ID, 48<<10)
 		}
 		rw.OpenLog = run.Status == store.StatusFailed
+		if run.Status == store.StatusFailed {
+			rw.Explain = s.run.Explain(p.Them, ph.ID)
+		}
+		if ph.ID == "g4" && run.Status != "" && run.Status != store.StatusRunning && run.Status != store.StatusFailed {
+			if pv, ok := s.run.Plan(p.Them); ok {
+				rw.Plan = pv
+			}
+		}
+		if ph.ID == "g6" && run.Status != "" && run.Status != store.StatusRunning {
+			if av, ok := s.run.Acceptance(p.Them); ok {
+				rw.Acc = av
+			}
+		}
 		if run.Status == store.StatusRunning {
 			rw.Progress = s.progressOf(p.Them, ph.ID)
 		}
@@ -333,6 +379,18 @@ func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total in
 		}
 		rows = append(rows, rw)
 	}
+	// The one step to do now is the first that isn't done; later ones wait.
+	cur := -1
+	for i := range rows {
+		if !rows[i].Done && !rows[i].Optional {
+			cur = i
+			break
+		}
+	}
+	for i := range rows {
+		rows[i].Current = i == cur
+		rows[i].Locked = cur >= 0 && i > cur && rows[i].Status == ""
+	}
 	return rows, done, total
 }
 
@@ -341,7 +399,7 @@ func chip(status string) (string, string) {
 	case store.StatusRunning:
 		return "info", "Running"
 	case store.StatusPassed:
-		return "ok", "Passed"
+		return "ok", "Done"
 	case store.StatusFailed:
 		return "err", "Failed"
 	case store.StatusWaiting:
@@ -374,7 +432,7 @@ type linkRow struct {
 	DaysLeft                int
 	Problems                []string
 	FlashFrom, FlashOurs    string
-	SetupLink               string
+	SetupLink, SetupNote    string
 	Admitted                bool
 	Send                    *sendView
 }
@@ -427,12 +485,18 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		// Admitted on the core but still being set up here (phase 10 passed,
 		// 11-14 to go): that's progress, not a fault, so not red.
-		if p, ok := records[l.Them]; ok {
+		// A link that is up stays shown as it measures, with a note (a renewal
+		// of a running peering must not hide its health).
+		if p, ok := records[l.Them]; ok && p.Method == store.MethodGoatbuilder {
 			if _, done, total := s.rows(&p, ""); done < total {
-				row.Chip, row.StateText, row.Problems = "", fmt.Sprintf("In setup: %d of %d phases", done, total), nil
-				v.Setting++
-				v.Links = append(v.Links, row)
-				continue
+				if row.Chip == "ok" {
+					row.SetupNote = fmt.Sprintf("Being set up again: step %d of %d", min(done+1, total), total)
+				} else {
+					row.Chip, row.StateText, row.Problems = "", fmt.Sprintf("In setup: step %d of %d", min(done+1, total), total), nil
+					v.Setting++
+					v.Links = append(v.Links, row)
+					continue
+				}
 			}
 		}
 		switch row.Chip {
@@ -449,8 +513,12 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_, done, total := s.rows(&p, "")
+		state := fmt.Sprintf("In setup: step %d of %d", min(done+1, total), total)
+		if p.Method != store.MethodGoatbuilder {
+			state = "Not finished (earlier method)"
+		}
 		v.Setting++
-		v.Links = append(v.Links, linkRow{Them: p.Them, Name: p.Name, Chip: "", StateText: fmt.Sprintf("In setup: %d of %d phases", done, total), SetupLink: "/setup?n=" + p.Them})
+		v.Links = append(v.Links, linkRow{Them: p.Them, Name: p.Name, Chip: "", StateText: state, SetupLink: "/setup?n=" + p.Them})
 	}
 	d.Status = v
 	s.render(w, "page.html", d)
@@ -610,7 +678,7 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		Busy   string       `json:"busy"`
 		Phases []phaseState `json:"phases"`
 	}{Busy: s.run.Busy()}
-	for _, ph := range runner.PhasesFor(p.Method) {
+	for _, ph := range runner.Phases {
 		st := phaseState{ID: ph.ID}
 		if run := p.Runs[ph.ID]; run != nil {
 			st.Status = run.Status
@@ -658,11 +726,7 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = strings.ToUpper(them)
 	}
-	method := store.MethodGoatbuilder
-	if r.PostFormValue("method") == "legacy" {
-		method = ""
-	}
-	if err := s.st.Create(them, name, r.PostFormValue("listen") != "them", method); err != nil {
+	if err := s.st.Create(them, name, r.PostFormValue("listen") != "them", store.MethodGoatbuilder); err != nil {
 		back(w, r, "", err)
 		return
 	}
@@ -723,6 +787,29 @@ func (s *server) handleListen(w http.ResponseWriter, r *http.Request) {
 	err := s.st.SetListener(them, weListen)
 	if err == nil {
 		s.log.Info("listener changed", "them", them, "we_listen", weListen, "by", viewer(r))
+	}
+	back(w, r, them, err)
+}
+
+// handleRestart moves a peering set up with the earlier method onto
+// goatbuilder: its recorded steps are cleared and the guided steps begin from
+// the top. Nothing on a host changes.
+func (s *server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad form.", http.StatusBadRequest)
+		return
+	}
+	them := r.PostFormValue("n")
+	if s.run.Busy() != "" {
+		back(w, r, them, errors.New("wait for the running step to finish"))
+		return
+	}
+	err := s.st.Update(them, func(p *store.Peering) error {
+		p.Method, p.Runs = store.MethodGoatbuilder, nil
+		return nil
+	})
+	if err == nil {
+		s.log.Info("peering restarted with goatbuilder", "them", them, "by", viewer(r))
 	}
 	back(w, r, them, err)
 }

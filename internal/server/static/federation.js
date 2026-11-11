@@ -25,10 +25,10 @@
       if (label) label.textContent = (p.m ? "Step " + p.n + " of " + p.m + ": " + p.label : "Starting") + " · " + p.elapsed;
     }
   }
-  document.querySelectorAll(".phase.s-running").forEach(function (row) { setProgress(row, null); });
+  document.querySelectorAll(".step.s-running").forEach(function (row) { setProgress(row, null); });
 
   // Follow the log of a running phase; reload once nothing is running.
-  var running = document.querySelector(".phase.s-running") || document.body.dataset.busy;
+  var running = document.querySelector(".step.s-running") || document.body.dataset.busy;
   if (n && running && window.fetch) {
     var timer = setInterval(async function () {
       var res;

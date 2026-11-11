@@ -36,15 +36,15 @@ type Run struct {
 
 // Peering is one federation with a host nation.
 type Peering struct {
-	Them     string          `json:"them"`
-	Name     string          `json:"name"`
-	WeListen bool            `json:"we_listen"`
+	Them     string `json:"them"`
+	Name     string `json:"name"`
+	WeListen bool   `json:"we_listen"`
 	// Method is how the phases are driven: "goatbuilder" (goatbuilder federate,
 	// 0.5.1 and later) or "" for the earlier scripts (goat federate), which
 	// the peerings set up before it keep.
-	Method string `json:"method,omitempty"`
-	Created  time.Time       `json:"created"`
-	Runs     map[string]*Run `json:"runs,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Created time.Time       `json:"created"`
+	Runs    map[string]*Run `json:"runs,omitempty"`
 }
 
 // Run returns the phase's run record, creating it.
@@ -170,8 +170,8 @@ func (s *Store) Update(them string, fn func(*Peering) error) error {
 // are cleared, because they were run with the old setting.
 func (s *Store) SetListener(them string, weListen bool) error {
 	return s.Update(them, func(p *Peering) error {
-		if r := p.Runs["p5"]; r != nil && r.Status == StatusPassed {
-			return fmt.Errorf("phase 5 has passed: who listens is in the package %s already holds. Start the peering again to change it", them)
+		if r := p.Runs["g2"]; r != nil && r.Status == StatusPassed {
+			return fmt.Errorf("the packages are exchanged: who listens is in the package %s already holds. Back the peering out and start again to change it", them)
 		}
 		for _, r := range p.Runs {
 			if r.Status == StatusRunning {

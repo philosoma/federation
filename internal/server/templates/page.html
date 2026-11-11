@@ -66,6 +66,7 @@
       <div><dt>Agreement ends</dt><dd>{{if .Expires}}{{.Expires}} ({{.DaysLeft}} days){{else}}not recorded{{end}}</dd></div>
     </dl>
     {{range .Problems}}<div class="note">{{.}}</div>{{end}}
+    {{with .SetupNote}}<div class="note note-info">{{.}}</div>{{end}}
     {{with .Send}}{{$s := .}}
     <details class="send" id="send-{{.Them}}"{{if .Open}} open{{end}}>
     <summary><span class="kicker">What we send</span> <span class="send-sum">{{.Summary}}</span>{{if .Applying}} <span class="badge info">Applying…</span>{{end}}{{if .Failed}} <span class="badge err">Last change failed</span>{{end}}</summary>
@@ -105,11 +106,11 @@
   <div class="peer-title">
     <div class="kicker">Federating {{upper $.Site}} with</div>
     <h1 class="peer-name">{{with flag .Them}}<img class="flag flag-title" src="/static/flags/{{.}}.svg" alt="">{{else}}<span class="flag flag-title flag-code" title="No flag for this code">{{upper .Them}}</span>{{end}} {{.Name}} <span class="code big">{{.Them}}</span></h1>
-    <div class="peer-sub">{{if .WeListen}}We listen.{{with $.Endpoint}} They dial us at <code class="endpoint">{{.Address}}</code>{{if not .Reserved}} <span class="endpoint-note">(reserved when phase 1 runs)</span>{{end}}{{else}} They dial our forwarder; the port is set in phase 1.{{end}}{{else}}They listen; our edge dials them.{{end}}
+    <div class="peer-sub">{{if .WeListen}}We listen.{{with $.Endpoint}} They dial us at <code class="endpoint">{{.Address}}</code>{{if not .Reserved}} <span class="endpoint-note">(reserved when the link is reserved)</span>{{end}}{{else}} They dial our forwarder; the port is chosen when the link is reserved.{{end}}{{else}}They listen; our edge dials them.{{end}}
       {{if $.CanChangeListener}}<details class="listen-change"><summary>Change</summary>
         <form method="post" action="/listen" class="listen-form">
           <input type="hidden" name="n" value="{{.Them}}">
-          <p>Exactly one side accepts inbound UDP. If they have a public address, they listen. If both sides are behind NAT, we listen through our forwarder. Their package must say the opposite of ours. Changing this clears phases 1 to 4, so run them again.</p>
+          <p>Exactly one side accepts inbound UDP. If they have a public address, they listen. If both sides are behind NAT, we listen through our forwarder. Their package must say the opposite of ours. Changing this clears the steps so far, so run them again.</p>
           <select name="listen"><option value="us"{{if .WeListen}} selected{{end}}>We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them"{{if not .WeListen}} selected{{end}}>They do (we dial them)</option></select>
           <button class="btn" type="submit">Save</button>
         </form></details>{{end}}
@@ -117,70 +118,125 @@
   </div>
   <div class="peer-progress">
     <a class="btn primary new-btn" href="/setup?new">+ New peering</a>
-    <span class="badge {{if eq $.Done $.Total}}ok{{else}}info{{end}}">{{if eq $.Done $.Total}}Federated{{else}}{{$.Done}} of {{$.Total}} phases{{end}}</span>
+    <span class="badge {{if eq $.Done $.Total}}ok{{else}}info{{end}}">{{if $.Legacy}}Earlier method{{else if eq $.Done $.Total}}Federated{{else}}Step {{$.StepNow}} of {{$.Total}}{{end}}</span>
   </div>
 </section>
 
-<ol class="phases">
+{{if $.Legacy}}
+<section class="card legacy-card">
+  <h2>Set up with the earlier method</h2>
+  <p>This peering was set up before goatbuilder federate. {{if $.LegacyDone}}It keeps running as it is, and shows on Status.{{else}}It wasn't finished, and the earlier scripts are gone.{{end}} To run it from here (to finish it, or to renew its agreement) start it again with goatbuilder: the steps begin from the top, and nothing on the hosts changes until a step does it.</p>
+  <form method="post" action="/restart" class="danger-form runform" data-confirm="Start {{.Name}} again with goatbuilder? Its recorded steps here are cleared. Nothing on the edge or core changes yet.">
+    <input type="hidden" name="n" value="{{$n}}">
+    <button class="btn primary" type="submit"{{if $.Busy}} disabled{{end}}>Start again with goatbuilder</button>
+  </form>
+</section>
+{{else}}
+<ol class="steps">
 {{range $.Rows}}
-  <li class="phase s-{{if .Status}}{{.Status}}{{else}}idle{{end}}" id="{{.ID}}" data-phase="{{.ID}}">
-    <div class="phase-top">
-      <span class="pnum">{{.Num}}</span>
-      <div class="ptitle">
-        <h2>{{.Title}}{{if .Optional}} <em>optional</em>{{end}}</h2>
-        <p>{{.Does}}</p>
-      </div>
-      <span class="badge {{.Chip}}" data-status>{{.StatusText}}</span>
-      <form method="post" action="/run" class="runform"{{if .Confirm}} data-confirm="{{.Confirm}}"{{end}}>
-        <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
-        <button class="btn {{if .CanRun}}primary{{end}}" type="submit"{{if not .CanRun}} disabled title="{{.Why}}"{{end}}>{{if eq .Status "running"}}Running…{{else if .Status}}Run again{{else}}Run{{end}}</button>
-      </form>
-    </div>
-    <div class="phase-body">
-      <div class="worked">Worked when: {{.WorkedWhen}}{{if .Finished.IsZero}}{{else}} · last run {{ago $.Now .Finished}}{{if .By}} by {{.By}}{{end}}{{end}}</div>
-      {{if eq .Status "running"}}
-      <div class="progress" data-progress{{with .Progress}} data-pct="{{.Pct}}"{{end}}>
-        <div class="pbar"><span class="pfill"></span></div>
-        <div class="plabel" data-plabel>{{with .Progress}}{{if .M}}Step {{.N}} of {{.M}}: {{.Label}}{{else}}Starting{{end}} · {{.Elapsed}}{{else}}Starting{{end}}</div>
-      </div>
-      {{end}}
-      {{if .Note}}<div class="note">{{.Note}}</div>{{end}}
-      {{if or .Ours .Theirs}}
-      <div class="exchange">
-        <section class="side ours">
-          <h4>Ours <small>give these to {{.Partner}}</small></h4>
-          {{if .Ours}}<dl class="outputs">{{range .Ours}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{else}}<p class="side-empty">Not published yet.</p>{{end}}
-        </section>
-        <section class="side theirs">
-          <h4>Theirs <small>from the directory: confirm with {{.Partner}}</small></h4>
-          {{if .Theirs}}<dl class="outputs">{{range .Theirs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{else}}<p class="side-empty">Not on the directory yet.</p>{{end}}
-        </section>
-      </div>
-      {{end}}
-      {{if .Outputs}}
-      <dl class="outputs">{{range .Outputs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>
-      {{end}}
-      {{if .ShowAfter}}
-      <form method="post" action="/record" class="after">
-        <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
-        {{range .After}}
-          {{if eq .Kind "check"}}<label class="check"><input type="checkbox" name="{{.Key}}"><span>{{.Label}}</span></label>
-          {{else}}<label class="field">{{.Label}}<input name="{{.Key}}" autocomplete="off" spellcheck="false">{{if .Hint}}<small>{{.Hint}}</small>{{end}}</label>{{end}}
+  <li class="step s-{{if .Status}}{{.Status}}{{else}}idle{{end}}{{if .Current}} is-current{{end}}{{if .Locked}} is-locked{{end}}{{if .Done}} is-done{{end}}" id="{{.ID}}" data-phase="{{.ID}}">
+    <div class="step-rail"><span class="step-dot">{{if .Done}}✓{{else}}{{.Index}}{{end}}</span></div>
+    <div class="step-main">
+    <details class="step-box"{{if or .Current (eq .Status "running") (eq .Status "failed") (eq .Status "waiting")}} open{{end}}>
+      <summary>
+        <span class="step-title">{{.Title}}</span>
+        {{with .Tag}}<span class="tag">{{.}}</span>{{end}}
+        <span class="step-sum">{{if .Done}}{{.Summary}}{{else if .Locked}}{{.Why}}{{end}}</span>
+        <span class="badge {{.Chip}}" data-status>{{.StatusText}}</span>
+      </summary>
+      <div class="step-body">
+        <p class="does">{{.Does}}</p>
+        {{if and .Needs (not .Done)}}<p class="needs"><strong>Before you run it:</strong> {{.Needs}}</p>{{end}}
+        {{if eq .Status "running"}}
+        <div class="progress" data-progress{{with .Progress}} data-pct="{{.Pct}}"{{end}}>
+          <div class="pbar"><span class="pfill"></span></div>
+          <div class="plabel" data-plabel>{{with .Progress}}{{if .M}}Step {{.N}} of {{.M}}: {{.Label}}{{else}}Starting{{end}} · {{.Elapsed}}{{else}}Starting{{end}}</div>
+        </div>
         {{end}}
-        <div><button class="btn primary" type="submit">Record and continue</button></div>
-      </form>
-      {{end}}
-      {{if .Confirm}}<dl class="outputs recorded">{{range .Confirm}}<div><dt>{{.Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{end}}
-      {{if .Status}}
-      <details class="log"{{if .OpenLog}} open{{end}}>
-        <summary>Log <a href="/log?n={{$n}}&amp;phase={{.ID}}" target="_blank" rel="noopener">full ↗</a></summary>
-        <pre data-log>{{.Log}}</pre>
-      </details>
-      {{end}}
+        {{if .Note}}<div class="note{{if eq .Status "failed"}} note-err{{end}}">{{.Note}}</div>{{end}}
+        {{with .Explain}}<details class="explain" open><summary>What goatbuilder says about it</summary><pre>{{.}}</pre></details>{{end}}
+        {{if .Checks}}
+        <ul class="checks">{{range .Checks}}<li class="c-{{.State}}"><span class="c-mark">{{if eq .State "ok"}}✓{{else if eq .State "warn"}}!{{else}}✕{{end}}</span><span class="c-name">{{.Name}}</span><span class="c-detail">{{.Detail}}</span></li>{{end}}</ul>
+        {{end}}
+        {{if or .Ours .Theirs}}
+        <div class="exchange">
+          <section class="side ours">
+            <h4>Read these to {{.Partner}}</h4>
+            {{if .Ours}}<dl class="outputs">{{range .Ours}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{else}}<p class="side-empty">Not published yet.</p>{{end}}
+          </section>
+          <section class="side theirs">
+            <h4>Check as {{.Partner}} reads theirs</h4>
+            {{if .Theirs}}<dl class="outputs">{{range .Theirs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl><p class="side-empty">Their verifying key is never shown from the directory: type it below as they read it.</p>{{else}}<p class="side-empty">Not on the directory yet.</p>{{end}}
+          </section>
+        </div>
+        {{end}}
+        {{if .Outputs}}
+        <dl class="outputs">{{range .Outputs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>
+        {{end}}
+        {{with .Plan}}
+        <div class="review">
+          <section><h4>The plan</h4>
+            <dl class="outputs">
+              <div><dt>Conflicts</dt><dd>{{if .Conflicts}}<ul class="plain bad">{{range .Conflicts}}<li>{{.}}</li>{{end}}</ul>{{else}}none{{end}}</dd></div>
+              {{if .NotReady}}<div><dt>Not ready</dt><dd><ul class="plain bad">{{range .NotReady}}<li>{{.}}</li>{{end}}</ul></dd></div>{{end}}
+              {{with .Transport}}<div><dt>Transport</dt><dd>{{.}}</dd></div>{{end}}
+              {{with .Subnet}}<div><dt>Link subnet</dt><dd><code>{{.}}</code></dd></div>{{end}}
+              <div><dt>This peering owns</dt><dd><ul class="plain">{{range .Owns}}<li>{{.}}</li>{{else}}<li>nothing listed</li>{{end}}</ul></dd></div>
+              <div><dt>Restarts</dt><dd><ul class="plain">{{range .Restarts}}<li>{{.}}</li>{{else}}<li>none listed</li>{{end}}</ul></dd></div>
+            </dl>
+          </section>
+          {{with .Admission}}<section><h4>What our core will admit</h4><pre class="admission">{{.}}</pre></section>{{end}}
+        </div>
+        {{end}}
+        {{with .Acc}}
+        <table class="acc"><thead><tr><th>Check</th><th>Result</th><th>Why</th></tr></thead><tbody>
+          {{range .Checks}}<tr class="v-{{.Verdict}}"><td>{{.Name}}</td><td><span class="badge {{if eq .Verdict "PASS"}}ok{{else if eq .Verdict "FAIL"}}err{{else}}warn{{end}}">{{.Verdict}}</span></td><td>{{.Reason}}</td></tr>{{end}}
+        </tbody></table>
+        {{end}}
+        {{if .ShowAfter}}
+        <form method="post" action="/record" class="after">
+          <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
+          {{with .AfterIntro}}<p class="after-intro">{{.}}</p>{{end}}
+          {{range .After}}
+            {{if eq .Kind "check"}}<label class="check"><input type="checkbox" name="{{.Key}}"><span>{{.Label}}</span></label>
+            {{else}}<label class="field">{{.Label}}<input name="{{.Key}}" autocomplete="off" spellcheck="false">{{if .Hint}}<small>{{.Hint}}</small>{{end}}</label>{{end}}
+          {{end}}
+          <div><button class="btn primary" type="submit">Confirm and continue</button></div>
+        </form>
+        {{end}}
+        {{if .Confirm}}<dl class="outputs recorded">{{range .Confirm}}<div><dt>{{.Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{end}}
+        <div class="step-actions">
+          {{if not .Locked}}
+          <form method="post" action="/run" class="runform"{{if .ConfirmText}} data-confirm="{{.ConfirmText}}"{{end}}>
+            <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
+            <button class="btn {{if and .CanRun (not .Done) (not .ShowAfter)}}primary{{end}}" type="submit"{{if not .CanRun}} disabled title="{{.Why}}"{{end}}>{{if eq .Status "running"}}Running…{{else if eq .Status "failed"}}Try again{{else if .Status}}Run again{{else}}{{.Verb}}{{end}}</button>
+          </form>
+          {{end}}
+          <span class="worked">Done when: {{.WorkedWhen}}{{if .Finished.IsZero}}{{else}} · last run {{ago $.Now .Finished}}{{if .By}} by {{.By}}{{end}}{{end}} · goatbuilder: {{.Num}}</span>
+        </div>
+        {{if .Status}}
+        <details class="log"{{if .OpenLog}} open{{end}}>
+          <summary>Log <a href="/log?n={{$n}}&amp;phase={{.ID}}" target="_blank" rel="noopener">full ↗</a></summary>
+          <pre data-log>{{.Log}}</pre>
+        </details>
+        {{end}}
+      </div>
+    </details>
     </div>
   </li>
 {{end}}
 </ol>
+{{if $.AllDone}}
+<section class="card done-card">
+  <h2>{{.Name}} is federated</h2>
+  <p>The link is up and accepted. Two things are left, and both are yours:</p>
+  <ul>
+    <li><strong>Choose what they get.</strong> Nothing of ours is sent until you tick it: <a href="/#link-{{$n}}">open {{.Name}} on Status</a> and use “What we send”.</li>
+    <li><strong>Publish “exchanging”.</strong> Each side states in its own config that the partnership carries data, once both acceptances pass.</li>
+  </ul>
+</section>
+{{end}}
+{{end}}
 
 {{with $.GB}}<section class="card gb-status"><span class="kicker">goatbuilder federate status</span>
   <dl class="link-facts">{{with .LastRun}}<div><dt>Last run</dt><dd>{{.}}</dd></div>{{end}}{{with .Next}}<div><dt>Next</dt><dd><code>{{.}}</code></dd></div>{{end}}{{with .Acceptance}}<div><dt>Acceptance</dt><dd>{{.}}</dd></div>{{end}}</dl>
@@ -223,7 +279,6 @@
   <form class="card new-form" method="post" action="/peerings">
     <label>Their code<input name="them" required pattern="[a-z0-9][a-z0-9\-]{1,15}" placeholder="can" autocomplete="off" spellcheck="false"><small>Usually the ISO alpha-3 country code, lower case (can, usa). Codes that aren\'t countries (uk1) show their code instead of a flag.</small></label>
     <label>Name<input name="name" placeholder="Canada" maxlength="80"></label>
-    <label>Method<select name="method"><option value="goatbuilder" selected>goatbuilder federate (0.5.1)</option><option value="legacy">Earlier scripts (goat federate, until 2026-12-11)</option></select><small>New peerings use goatbuilder. The earlier scripts are for finishing one already under way.</small></label>
     <label>Who listens?<select name="listen"><option value="us">We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them">They do (we dial them)</option></select><small>One side accepts inbound UDP. A partner with a public address listens; if both are behind NAT, we listen through our forwarder.</small></label>
     <div class="form-actions"><button class="btn primary" type="submit">Engage</button></div>
   </form>

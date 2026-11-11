@@ -42,7 +42,7 @@ func newTest(t *testing.T, groups []string) (http.Handler, *store.Store, *runner
 	}
 	// Stand-in scripts: each prints a line and passes, without touching a host.
 	fake := fstest.MapFS{}
-	for _, ph := range append(append([]runner.Phase{}, runner.Phases...), runner.GBPhases...) {
+	for _, ph := range runner.Phases {
 		fake["scripts/"+ph.Script] = &fstest.MapFile{Data: []byte("echo \"$FED_THEM $FED_US\"\necho '::show digest=sha256: 0000'\necho '::show our_key=xlBt YGcA'\necho '::show their_key=v56n Mz4/'\n")}
 	}
 	rn, err := runner.NewWithScripts(st, dir, "gbr", []string{"PATH=/usr/bin:/bin"}, log, fake)
@@ -84,109 +84,6 @@ func wait(t *testing.T, rn *runner.Runner) {
 	}
 }
 
-func TestFlow(t *testing.T) {
-	h, st, rn := newTest(t, nil)
-	if w := do(h, "GET", "/", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Federation links") {
-		t.Fatalf("front page should be Status: %d", w.Code)
-	}
-	if w := do(h, "GET", "/status", nil, nil); w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != "/" {
-		t.Fatalf("old status address: %d %s", w.Code, w.Header().Get("Location"))
-	}
-	if w := do(h, "GET", "/setup", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Start a new peering") {
-		t.Fatalf("empty page: %d", w.Code)
-	}
-	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}, "name": {"Canada"}, "listen": {"us"}}, nil); w.Code != http.StatusSeeOther {
-		t.Fatalf("create: %d", w.Code)
-	}
-	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"Canada!"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatal("bad code accepted")
-	}
-	page := do(h, "GET", "/setup?n=can", nil, nil).Body.String()
-	if !strings.Contains(page, "Preflight") || !strings.Contains(page, "We listen") {
-		t.Fatal("peering page incomplete")
-	}
-
-	// Phases run in order.
-	if w := do(h, "POST", "/run", url.Values{"n": {"can"}, "phase": {"p2"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatal("phase 2 ran before phase 1")
-	}
-	do(h, "POST", "/run", url.Values{"n": {"can"}, "phase": {"p1"}}, nil)
-	wait(t, rn)
-	p, _ := st.Get("can")
-	if p.Runs["p1"].Status != store.StatusPassed {
-		t.Fatalf("p1: %+v", p.Runs["p1"])
-	}
-	if log := rn.Tail("can", "p1", 4096); !strings.Contains(log, "finished: passed") {
-		t.Fatalf("log: %q", log)
-	}
-	if w := do(h, "GET", "/log?n=can&phase=p1", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Phase 1") {
-		t.Fatalf("full log: %d", w.Code)
-	}
-
-	// Phase 5 waits for people, then passes on a valid record.
-	do(h, "POST", "/run", url.Values{"n": {"can"}, "phase": {"p2"}}, nil)
-	wait(t, rn)
-	do(h, "POST", "/run", url.Values{"n": {"can"}, "phase": {"p5"}}, nil)
-	wait(t, rn)
-	p, _ = st.Get("can")
-	if p.Runs["p5"].Status != store.StatusWaiting {
-		t.Fatalf("p5: %+v", p.Runs["p5"])
-	}
-	if w := do(h, "POST", "/record", url.Values{"n": {"can"}, "phase": {"p5"}, "ours_confirmed": {"on"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatal("record with one tick accepted")
-	}
-	do(h, "POST", "/record", url.Values{"n": {"can"}, "phase": {"p5"}, "ours_confirmed": {"on"}, "theirs_confirmed": {"on"}}, nil)
-	p, _ = st.Get("can")
-	if p.Runs["p5"].Status != store.StatusPassed {
-		t.Fatalf("p5 after record: %+v", p.Runs["p5"])
-	}
-	// The page shows our codes and theirs in separate boxes.
-	page = do(h, "GET", "/setup?n=can", nil, nil).Body.String()
-	if !strings.Contains(page, `class="side ours"`) || !strings.Contains(page, `class="side theirs"`) {
-		t.Fatal("ours/theirs boxes missing")
-	}
-
-	if w := do(h, "GET", "/api/state?n=can", nil, nil); !strings.Contains(w.Body.String(), `"status":"passed"`) {
-		t.Fatalf("state: %s", w.Body)
-	}
-
-	// Who listens is fixed once phase 5 has passed.
-	if w := do(h, "POST", "/listen", url.Values{"n": {"can"}, "listen": {"them"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatal("listener changed after phase 5")
-	}
-
-	do(h, "POST", "/delete", url.Values{"n": {"can"}, "confirm": {"no"}}, nil)
-	if _, ok := st.Get("can"); !ok {
-		t.Fatal("deleted without confirmation")
-	}
-	do(h, "POST", "/delete", url.Values{"n": {"can"}, "confirm": {"can"}}, nil)
-	if _, ok := st.Get("can"); ok {
-		t.Fatal("not deleted")
-	}
-}
-
-func TestListenerChangeClearsRuns(t *testing.T) {
-	h, st, rn := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "listen": {"us"}}, nil)
-	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"p1"}}, nil)
-	wait(t, rn)
-	do(h, "POST", "/listen", url.Values{"n": {"usa"}, "listen": {"them"}}, nil)
-	p, _ := st.Get("usa")
-	if p.WeListen || len(p.Runs) != 0 {
-		t.Fatalf("after change: listen=%v runs=%v", p.WeListen, p.Runs)
-	}
-}
-
-func TestStatusPage(t *testing.T) {
-	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
-	w := do(h, "GET", "/", nil, nil)
-	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, "Federation links") || !strings.Contains(body, "In setup: 0 of 8 phases") {
-		t.Fatalf("status page: %d\n%s", w.Code, body)
-	}
-}
-
 func TestFlags(t *testing.T) {
 	if countries["can"].Flag != "ca" || countries["usa"].Name != "United States" {
 		t.Fatalf("country table: %+v %+v", countries["can"], countries["usa"])
@@ -195,63 +92,23 @@ func TestFlags(t *testing.T) {
 		t.Fatal("ca.svg not bundled")
 	}
 	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "name": {"United States"}}, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"uk1"}, "name": {"Test"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"them": {"uk1"}, "name": {"Test"}}, nil)
 	body := do(h, "GET", "/", nil, nil).Body.String()
 	if !strings.Contains(body, `src="/static/flags/us.svg"`) || !strings.Contains(body, `flag-code" title="No flag for this code">UK1<`) {
 		t.Fatalf("flags on the status page:\n%s", body)
 	}
 }
 
-func TestEndpointShown(t *testing.T) {
-	h, _, rn := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}, "listen": {"us"}}, nil)
-	// No config clone in the test, so no guess: the page says phase 1 sets it.
-	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, "the port is set in phase 1") {
-		t.Fatal("no fallback line before phase 1")
-	}
-	// After phase 1 the allocation is what counts.
-	dir := filepath.Join(rn.LogPath("est", "p1"), "..", "..", "..", "work", "est")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "alloc.env"), []byte("N=2\nIFACE=wg-fed2\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, `<code class="endpoint">fed.example.org:51824</code>`) {
-		t.Fatal("endpoint from alloc.env not shown")
-	}
-}
-
-func TestSetupTitleFlag(t *testing.T) {
-	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}}, nil)
-	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, `class="flag flag-title" src="/static/flags/ee.svg"`) {
-		t.Fatal("no flag in the Setup title")
-	}
-}
-
-func TestNewPeeringPage(t *testing.T) {
-	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}}, nil)
-	body := do(h, "GET", "/setup?new", nil, nil).Body.String()
-	if strings.Contains(body, "Agreement and certificates") || !strings.Contains(body, "Start a new peering") {
-		t.Fatal("/setup?new should show only the new-peering form")
-	}
-	if !strings.Contains(do(h, "GET", "/setup?n=est", nil, nil).Body.String(), `href="/setup?new">+ New peering`) {
-		t.Fatal("no New peering button on a peering")
-	}
-}
-
 func TestCrossSiteRefused(t *testing.T) {
 	h, _, _ := newTest(t, nil)
-	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Sec-Fetch-Site": "cross-site"}); w.Code != http.StatusForbidden {
+	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Sec-Fetch-Site": "cross-site"}); w.Code != http.StatusForbidden {
 		t.Fatalf("cross-site: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
+	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
 		t.Fatalf("origin: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "null"}); w.Code != http.StatusSeeOther {
+	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "null"}); w.Code != http.StatusSeeOther {
 		t.Fatalf("same-origin form: %d", w.Code)
 	}
 }
@@ -319,35 +176,112 @@ func TestWhatWeSend(t *testing.T) {
 	}
 }
 
-func TestGoatbuilderFlow(t *testing.T) {
-	h, st, rn := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
-	p, _ := st.Get("usa")
-	if p.Method != store.MethodGoatbuilder {
-		t.Fatalf("a new peering should use goatbuilder: %q", p.Method)
+const testKey = "v56nMz4/abcdefghijklmnopqrstuvwxyzABCDEFGHI="
+
+// run starts a step and waits for it.
+func run(t *testing.T, h http.Handler, rn *runner.Runner, them, id string) {
+	t.Helper()
+	if w := do(h, "POST", "/run", url.Values{"n": {them}, "phase": {id}}, nil); strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatalf("run %s refused: %s", id, w.Header().Get("Location"))
 	}
+	wait(t, rn)
+}
+
+func record(t *testing.T, h http.Handler, them, id string, v url.Values) {
+	t.Helper()
+	v.Set("n", them)
+	v.Set("phase", id)
+	if w := do(h, "POST", "/record", v, nil); strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatalf("record %s: %s", id, w.Header().Get("Location"))
+	}
+}
+
+func TestGuidedFlow(t *testing.T) {
+	h, st, rn := newTest(t, nil)
+	if w := do(h, "GET", "/", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Federation links") {
+		t.Fatalf("front page should be Status: %d", w.Code)
+	}
+	if w := do(h, "GET", "/setup", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Start a new peering") {
+		t.Fatalf("empty setup page: %d", w.Code)
+	}
+	if w := do(h, "POST", "/peerings", url.Values{"them": {"Canada!"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("a bad code was accepted")
+	}
+	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
 	body := do(h, "GET", "/setup?n=usa", nil, nil).Body.String()
-	for _, want := range []string{"Allocate", "Plan and admission", "Deploy"} {
+	for _, want := range []string{"Check we&#39;re ready", "Reserve the link", "Review the plan", "Step 1 of 7", "is-current", "is-locked"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("goatbuilder rows missing %q", want)
+			t.Fatalf("setup page lacks %q", want)
 		}
 	}
-	if strings.Contains(body, "Admit the edge on our core") {
-		t.Fatal("legacy rows shown for a goatbuilder peering")
+	// Steps run in order.
+	if w := do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g1"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("Reserve ran before the readiness check")
 	}
-	// The rows run in order, and g2's codes are recorded before g3 can run.
-	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g1"}}, nil)
-	wait(t, rn)
-	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g2"}}, nil)
-	wait(t, rn)
+	run(t, h, rn, "usa", "ready")
+	run(t, h, rn, "usa", "g1")
+	run(t, h, rn, "usa", "g2")
+	// The exchange waits for the read-back; the next step can't run before it.
 	if w := do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g3"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatal("g3 ran before g2 was confirmed")
+		t.Fatal("Agree ran before the keys were confirmed")
 	}
-	if w := do(h, "POST", "/record", url.Values{"n": {"usa"}, "phase": {"g2"}, "their_key": {"v56nMz4/abcdefghijklmnopqrstuvwxyzABCDEFGHI="}, "ours_confirmed": {"on"}, "theirs_confirmed": {"on"}}, nil); strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatalf("record g2: %s", w.Header().Get("Location"))
+	if w := do(h, "POST", "/record", url.Values{"n": {"usa"}, "phase": {"g2"}, "their_key": {"short"}, "ours_confirmed": {"on"}, "theirs_confirmed": {"on"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("a malformed key was recorded")
 	}
-	if w := do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g3"}}, nil); strings.Contains(w.Header().Get("Location"), "error=") {
-		t.Fatalf("g3 refused after g2: %s", w.Header().Get("Location"))
+	record(t, h, "usa", "g2", url.Values{"their_key": {testKey}, "ours_confirmed": {"on"}, "theirs_confirmed": {"on"}})
+	run(t, h, rn, "usa", "g3")
+	record(t, h, "usa", "g3", url.Values{"digest_matched": {"on"}})
+	run(t, h, rn, "usa", "g4")
+	if w := do(h, "POST", "/record", url.Values{"n": {"usa"}, "phase": {"g4"}, "plan_ok": {"on"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("the plan was approved without the admission")
 	}
-	wait(t, rn)
+	record(t, h, "usa", "g4", url.Values{"plan_ok": {"on"}, "admission_ok": {"on"}})
+	run(t, h, rn, "usa", "g5")
+	run(t, h, rn, "usa", "g6")
+	record(t, h, "usa", "g6", url.Values{"theirs_passed": {"on"}})
+	p, _ := st.Get("usa")
+	for _, ph := range runner.Phases {
+		if r := p.Runs[ph.ID]; r == nil || r.Status != store.StatusPassed {
+			t.Fatalf("%s not passed: %+v", ph.ID, r)
+		}
+	}
+	body = do(h, "GET", "/setup?n=usa", nil, nil).Body.String()
+	if !strings.Contains(body, "United States is federated") || !strings.Contains(body, "Choose what they get") {
+		t.Fatal("no finish card")
+	}
+	// With every peering finished, Setup opens on the new-peering form.
+	if body := do(h, "GET", "/setup", nil, nil).Body.String(); strings.Contains(body, `class="steps"`) || !strings.Contains(body, "Start a new peering") {
+		t.Fatal("Setup should open on the new-peering form")
+	}
+}
+
+func TestEarlierMethodRestart(t *testing.T) {
+	h, st, _ := newTest(t, nil)
+	// A record from before goatbuilder: no method, old phase ids.
+	if err := st.Create("est", "Estonia", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := do(h, "GET", "/setup?n=est", nil, nil).Body.String()
+	if !strings.Contains(body, "Set up with the earlier method") || strings.Contains(body, `class="steps"`) {
+		t.Fatal("an earlier-method peering should offer a restart, not steps")
+	}
+	if w := do(h, "POST", "/run", url.Values{"n": {"est"}, "phase": {"ready"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("a step ran on an earlier-method peering")
+	}
+	do(h, "POST", "/restart", url.Values{"n": {"est"}}, nil)
+	if p, _ := st.Get("est"); p.Method != store.MethodGoatbuilder || len(p.Runs) != 0 {
+		t.Fatalf("restart: %+v", p)
+	}
+	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, `class="steps"`) {
+		t.Fatal("no steps after the restart")
+	}
+}
+
+func TestStatusPage(t *testing.T) {
+	h, _, _ := newTest(t, nil)
+	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
+	body := do(h, "GET", "/", nil, nil).Body.String()
+	if !strings.Contains(body, "In setup: step 1 of 7") {
+		t.Fatalf("status page:\n%s", body)
+	}
 }

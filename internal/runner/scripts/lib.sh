@@ -1,4 +1,4 @@
-# Shared by every phase script. Sourced, not run.
+# Shared by every step script. Sourced, not run.
 #
 # Values come from the environment, set by the Federation app (FED_THEM and
 # friends) and by the container (where the secrets and the hosts are). Nothing
@@ -155,87 +155,6 @@ assemble() {
 	ls -1dt "$FED_STATE/trees/$THEM-"* 2>/dev/null | tail -n +4 | xargs -r rm -rf
 }
 
-# ---- this peering's resources --------------------------------------------
-# Peering number N gets wg-fedN, edge port 5183N, link 169.254.(20+N).0/31,
-# republisher metrics port 9310+N and, through the forwarder, public port
-# 51820+2N with its carrier on the next port. Every edge router listens on
-# 7448, the port partners dial (it isn't in the agreement): each binds its own
-# link address, so they don't clash. Carriers live in 169.254.(200+N), away
-# from the link subnets partners propose. Kept in $W/alloc.env once chosen.
-alloc() {
-	if [ ! -f "$W/alloc.env" ]; then
-		echo "Choosing this link's interface, ports and subnet"
-		local n
-		n=$(python3 "$FED_SCRIPTS/fedcfg.py" next-index --repo "$CFG" --them "$THEM")
-		cat >"$W/alloc.env" <<-EOF
-			N=$n
-			IFACE=wg-fed$n
-			LISTEN_PORT=$((51830 + n))
-			EDGE_PORT=7448
-			METRICS_PORT=$((9310 + n))
-			SUBNET=169.254.$((20 + n)).0/31
-			PUBLIC_PORT=$((51820 + 2 * n))
-			CARRIER_PORT=$((51821 + 2 * n))
-			CARRIER_IFACE=wg-carry$n
-			CARRIER_NET=169.254.$((200 + n))
-			CARRIER_LOCAL_PORT=$([ "$n" -eq 0 ] && echo 51822 || echo $((51840 + n)))
-		EOF
-	fi
-	# shellcheck disable=SC1091
-	. "$W/alloc.env"
-	# Older allocations had no metrics port (slot 0 uses the default 9310), and
-	# gave each router its own port: every router now listens on 7448.
-	: "${METRICS_PORT:=$((9310 + N))}"
-	EDGE_PORT=7448
-	echo "link $N: $IFACE, edge port $LISTEN_PORT, router port $EDGE_PORT, subnet $SUBNET"
-}
-
-federation_toml() {
-	cat >"$HOME/.goat/contexts/$CTX/federation.toml" <<-EOF
-		# Written by Federation for $US <-> $THEM.
-		sovereign_id = "$US"
-		term_days    = 91
-		cut_contact  = "$FED_CONTACT"
-
-		[transport]
-		interface            = "$IFACE"
-		endpoint             = "${FED_PUBLIC_NAME:-unset.invalid}:$PUBLIC_PORT"
-		listener             = $FED_WE_LISTEN
-		proposed_link_subnet = "$SUBNET"
-		measured_mtu         = 1300
-
-		[data]
-		release                  = ["release/REL-ALL/**"]
-		accept_hz                = 100
-		accept_bytes_per_message = 1048576
-		accept_distinct_keys     = 5000
-	EOF
-}
-
-# ---- Ansible -------------------------------------------------------------
-# A peering play, the way the driver runs it.
-play() {
-	local limit=$1 pb=$2
-	shift 2
-	step "ansible-playbook $pb (limit $limit)"
-	(cd "$TREE/ops/ansible" && ../scripts/with-secrets ansible-playbook \
-		-i inventory/peering-edges.ini --limit "$limit" \
-		-e "fed_edge_group=${THEM}_edge" -e "fed_work=$W" -e "fed_counterparty=$W/theirs.canonical.json" \
-		"$@" "$pb")
-}
-
-# Keep an older copy of a file or folder before a phase replaces it.
-keep_old() {
-	local stamp
-	stamp=$(date -u +%Y%m%d%H%M%S)
-	local f
-	for f in "$@"; do
-		[ -e "$W/$f" ] || continue
-		mkdir -p "$W/old-$stamp"
-		mv "$W/$f" "$W/old-$stamp/"
-	done
-}
-
 # Our CA certificate in an assembled tree.
 our_ca_cert() { echo "$TREE/ops/enrollment/ca/$FED_SITE/root-cert.pem"; }
 
@@ -273,3 +192,38 @@ tree_to_config() {
 }
 # The value after a marker in goatbuilder's output, e.g. "sha256:…".
 gb_value() { grep -oE "$1[^ ,;\"]+" | head -1 | sed -E "s/^$1//"; }
+
+# ---- what the page shows ---------------------------------------------------
+# summary: the one line a finished step shows when it's collapsed.
+summary() { show summary "$*"; }
+# check: one line of a checklist. state is ok, warn or fail.
+CHECK_N=0
+CHECK_FAILED=0
+check() {
+	CHECK_N=$((CHECK_N + 1))
+	[ "$1" = fail ] && CHECK_FAILED=$((CHECK_FAILED + 1))
+	printf '::show check_%02d=%s|%s|%s\n' "$CHECK_N" "$1" "$2" "$3"
+	printf '  [%s] %s: %s\n' "$1" "$2" "$3"
+}
+# groups: a code in groups of four with the group count first, as the guide
+# has it read aloud ("11 groups: xlBt YGcA …").
+groups() { local g; g=$(groups4 "$1"); echo "$(echo "$g" | wc -w) groups: $g"; }
+# A failed step keeps what goatbuilder says about the code it stopped on, so
+# the page can show the meaning and the fix beside the error.
+rm -f "$W/${FED_PHASE:-step}.explain"
+explain_from() {
+	local code
+	code=$(echo "$1" | grep -oE 'GB-[0-9]{3}' | grep -vx 'GB-192' | tail -1) || true
+	[ -n "$code" ] || return 0
+	{ echo "$code"; goatbuilder explain "$code" --color never 2>/dev/null || true; } >"$W/${FED_PHASE:-step}.explain"
+}
+# gb_run: goatbuilder federate, output kept in $GB_OUT and printed. Returns
+# goatbuilder's exit code without stopping the script.
+gb_run() {
+	local rc=0
+	GB_OUT=$(gb "$@" 2>&1) || rc=$?
+	echo "$GB_OUT"
+	return $rc
+}
+# gb_die: stop with a message, keeping goatbuilder's explanation of the code.
+gb_die() { explain_from "${GB_OUT:-}"; die "$@"; }

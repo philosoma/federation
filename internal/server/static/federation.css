@@ -491,3 +491,55 @@ input:focus, select:focus { outline: 2px solid var(--green-hi); outline-offset: 
 .send-form .hint { color: var(--fog-2); margin: 0; }
 [hidden] { display: none !important; }
 .gb-status { margin: 1em 0; padding: 12px 14px; }
+
+/* ---- Setup: guided steps ------------------------------------------------ */
+.steps { list-style: none; margin: 0; padding: 0; }
+.step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
+.step-rail { display: flex; flex-direction: column; align-items: center; }
+.step-rail::after { content: ""; flex: 1; width: 2px; margin: 4px 0; background: var(--line-2); }
+.step:last-child .step-rail::after { display: none; }
+.step-dot { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .9em;
+  background: var(--ink-2); border: 2px solid var(--line-2); color: var(--fog-2); }
+.step.is-done .step-dot { background: var(--green-deep); border-color: var(--green-mid); color: var(--ok-text); }
+.step.is-current .step-dot { border-color: var(--green-hi); color: var(--fog-0); }
+.step.s-failed .step-dot { border-color: var(--red); color: var(--err-text); }
+.step.s-waiting .step-dot { border-color: var(--amber); color: var(--warn-text); }
+.step-main { min-width: 0; padding-bottom: 14px; }
+.step-box { background: var(--ink-2); border: 1px solid var(--line); border-radius: 8px; }
+.step.is-current .step-box { border-color: var(--green-mid); }
+.step.is-locked .step-box { opacity: .6; }
+.step-box > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .6em; padding: 11px 14px; }
+.step-box > summary::-webkit-details-marker { display: none; }
+.step-title { font-weight: 650; font-size: 1.05em; color: var(--fog-0); }
+.step-sum { flex: 1; min-width: 8em; color: var(--fog-2); font-size: .88em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--fog-1); }
+.step-body { padding: 0 14px 14px; display: grid; gap: 10px; }
+.step-body .does { margin: 0; color: var(--fog-1); }
+.step-body .needs { margin: 0; padding: 8px 10px; border-left: 3px solid var(--amber); background: var(--ink-1); border-radius: 0 6px 6px 0; font-size: .92em; }
+.step-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.step-actions .worked { color: var(--fog-2); font-size: .82em; }
+.note-err { background: var(--red-deep); color: var(--err-text); }
+.note-info { background: var(--ink-1); color: var(--fog-1); border: 1px solid var(--line-2); }
+.explain > summary { cursor: pointer; color: var(--fog-1); font-size: .88em; }
+.explain pre, .admission { margin: 6px 0 0; padding: 10px 12px; max-height: 360px; overflow: auto; background: var(--ink-0); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--fog-1); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.checks li { display: grid; grid-template-columns: 1.4em minmax(9em, 16em) minmax(0, 1fr); gap: 8px; font-size: .92em; align-items: baseline; }
+.c-mark { font-weight: 700; text-align: center; }
+.c-ok .c-mark { color: var(--green-hi); }
+.c-warn .c-mark { color: var(--amber); }
+.c-fail .c-mark { color: var(--red); }
+.c-fail .c-name { color: var(--err-text); }
+.c-detail { color: var(--fog-2); overflow-wrap: anywhere; }
+.review { display: grid; gap: 12px; }
+.review h4 { margin: 0 0 6px; font-size: .95em; }
+ul.plain { margin: 0; padding-left: 1.1em; }
+ul.plain.bad { color: var(--err-text); }
+.after-intro { margin: 0; font-size: .92em; }
+table.acc { width: 100%; border-collapse: collapse; font-size: .88em; }
+table.acc td, table.acc th { padding: 5px 8px; vertical-align: top; }
+table.acc td:last-child { color: var(--fog-2); overflow-wrap: anywhere; }
+.legacy-card, .done-card { padding: 16px 18px; margin: 0 0 1.2em; }
+.legacy-card h2, .done-card h2 { margin: 0 0 .4em; font-size: 1.15em; }
+.done-card { border-left: 4px solid var(--green-mid); }
+@media (max-width: 560px) { .step { grid-template-columns: 26px minmax(0, 1fr); gap: 8px; } .step-dot { width: 24px; height: 24px; font-size: .8em; } .checks li { grid-template-columns: 1.4em 1fr; } .c-detail { grid-column: 2; } }
