@@ -469,3 +469,17 @@ input:focus, select:focus { outline: 2px solid var(--green-hi); outline-offset: 
 .flag-title.flag-code { width: auto; min-width: 40px; font-size: 13px; }
 .peer-progress { gap: 8px; }
 .new-btn { font-size: .85em; padding: 5px 12px; }
+
+/* What we send, on a partner's card */
+.send-form { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.send-form fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+.send-form legend { color: var(--fog-2); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 6px; padding: 0; }
+.send-form .topic { display: flex; align-items: flex-start; gap: .6em; font-size: .92em; color: var(--fog-0); cursor: pointer; }
+.send-form .topic input { margin-top: .2em; accent-color: var(--green-mid); }
+.send-form .topic small { display: block; color: var(--fog-2); font-size: .85em; }
+.send-form fieldset:disabled .topic { cursor: not-allowed; opacity: .6; }
+.send-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; font-size: .85em; }
+.send-foot:empty { display: none; }
+.send-foot .btn { font-size: .85em; padding: 5px 12px; }
+.send-err { color: var(--err-text); }
+.send-form .hint { color: var(--fog-2); margin: 0; }

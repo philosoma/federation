@@ -115,6 +115,39 @@ so they won't get far locally.
   the forwarder, link subnet `169.254.(20+N).0/31` (unless the partner's wins)
   and republisher metrics port `9310+N`. Every edge router listens on 7448.
 
+## Choosing what each partner gets
+
+Each partner's card on the Status page has a **What we send** box, with one
+checkbox per topic. Ticking a box and saving is a release decision. The app
+commits the change to the release file in your config overlay
+(`ops/release-bridge/release-bridge.json`, or `FED_RELEASE_FILE`), then
+reinstalls and restarts the release bridge on the core. The core router doesn't
+restart and other partners aren't touched.
+
+The release file lists the topics. A topic is a group of internal key
+prefixes released together, and you edit the list in git:
+
+```json
+{
+  "rest": "http://127.0.0.1:8000",
+  "set": "REL-ALL",
+  "topics": [
+    {"id": "turret", "name": "Sentry turret", "detail": "detections, location, armed state, CoT",
+     "src": ["<slot>/turret/sensor/detection", "<slot>/turret/cots"]},
+    {"id": "sattrack", "name": "Sat tracker", "src": ["<slot>/sattrack/cots"]}
+  ],
+  "send": {"can": ["turret", "sattrack"], "est": ["turret"]}
+}
+```
+
+The bridge (`internal/runner/scripts/release-bridge.py`) copies each sample to
+`release/<set>/<partner>/<key without its slot id>`. Each partner's read on our
+core is narrowed to its own prefix, so it gets only what is ticked for it.
+Phase 10 writes these reads:
+`from/<us>/<set>/<partner>/**`, plus the acceptance check's shared
+`acceptance/**` and `fedcheck-ack/**` keys. Partners see our data as, for
+example, `from/gbr/REL-ALL/can/turret/cots/v1`.
+
 ## Known gaps
 
 - Written against one site's layout: inventory names, group_vars paths and the

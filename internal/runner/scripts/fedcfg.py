@@ -258,6 +258,23 @@ def wire_sets(us, releases):
     return out
 
 
+# The acceptance check and the round-trip responder stage under the set itself,
+# shared by every partner: test data only.
+ACCEPTANCE_KEYS = ("acceptance", "fedcheck-ack")
+
+
+def partner_reads(us, them, releases):
+    """What a partner may read on our core: its own prefix in each set
+    (from/<us>/<set>/<them>/**, where the release bridge stages what we send
+    it), plus the acceptance keys."""
+    out = []
+    for w in wire_sets(us, releases):
+        base = w[: -len("/**")]
+        out.append(f"{base}/{them}/**")
+        out += [f"{base}/{k}/**" for k in ACCEPTANCE_KEYS]
+    return out
+
+
 def narrow_whole_prefix(text, us):
     """With several peerings goat-zenoh refuses one that reads all of from/<us>/**.
     Narrow each such entry to the wire keys of its own republisher's sets, with
@@ -273,7 +290,7 @@ def narrow_whole_prefix(text, us):
         rp = re.search(r"^\s+republisher_release_key_exprs:\s*\[([^\]]*)\]", part, re.M)
         if not rk or rk.group(2).replace(" ", "") != whole.replace(" ", "") or not rp:
             continue
-        sets = wire_sets(us, [x.strip().strip('"\'') for x in rp.group(1).split(",") if x.strip()])
+        sets = partner_reads(us, m.group(1), [x.strip().strip('"\'') for x in rp.group(1).split(",") if x.strip()])
         if not sets:
             continue
         line = rk.group(1) + "[" + ", ".join(q(x) for x in sets) + "]"
@@ -293,11 +310,11 @@ def admit(a):
     sp = read(sp_p) if os.path.exists(sp_p) else "zenoh_sovereign_peerings:\n"
     if not re.search(rf"^\s*- sovereign: {re.escape(them)}\s*$", sp, re.M):
         sp = re.sub(r"^(#.*\n)*", lambda m: m.group(0) + f"#   {them.upper()}  {a.digest}, through {a.expires}\n", sp, count=1) if a.digest else sp
-        reads = wire_sets(us, releases) or [f"from/{us}/**"]
+        reads = partner_reads(us, them, releases) or [f"from/{us}/**"]
         sp = sp.rstrip("\n") + (
             f"\n  - sovereign: {them}\n"
             f"    cn: fed.{them}.{us}.01\n"
-            f"    release_key_exprs: [{', '.join(q(r) for r in reads)}]\n"
+            f"    release_key_exprs: [{', '.join(q(r) for r in reads)}]  # its own prefix + acceptance keys\n"
             f"    release_interest_key_exprs: [\"from/{us}/**\"]\n"
             f"    republisher_cn: fed.{us}.{them}.republisher.01\n"
             f"    republisher_release_key_exprs: [{', '.join(q(r) for r in releases)}]\n"

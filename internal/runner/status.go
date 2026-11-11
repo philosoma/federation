@@ -55,6 +55,8 @@ func (r *Runner) WatchStatus(ctx context.Context, interval time.Duration) {
 }
 
 func (r *Runner) measure(ctx context.Context) {
+	r.measureMu.Lock()
+	defer r.measureMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", filepath.Join(r.root, "scripts", "status.sh"))

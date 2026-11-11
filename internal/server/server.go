@@ -79,6 +79,7 @@ func New(cfg Config, st *store.Store, run *runner.Runner, version string, log *s
 	app.HandleFunc("POST /record", s.handleRecord)
 	app.HandleFunc("POST /delete", s.handleDelete)
 	app.HandleFunc("POST /listen", s.handleListen)
+	app.HandleFunc("POST /send", s.handleSend)
 	app.HandleFunc("GET /log", s.handleLog)
 	app.Handle("GET /static/", http.StripPrefix("/static/", cacheStatic(http.FileServerFS(static))))
 
@@ -356,6 +357,23 @@ type linkRow struct {
 	FlashFrom, FlashOurs    string
 	SetupLink               string
 	Admitted                bool
+	Send                    *sendView
+}
+
+// sendView is the "what we send" box on a partner's card.
+type sendView struct {
+	Them     string
+	Name     string
+	Topics   []topicBox
+	Applying bool   // the change is being applied now
+	Failed   string // the last change failed: why
+	Done     string // the last change: when and by whom
+	Busy     bool   // something else is running: the boxes can't be saved
+}
+
+type topicBox struct {
+	ID, Name, Detail string
+	On               bool
 }
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -371,10 +389,21 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		records[p.Them] = p
 	}
+	plan, havePlan := s.run.Release()
 	seen := map[string]bool{}
 	for _, l := range snap.Links {
 		seen[l.Them] = true
 		row := s.linkRow(l, records)
+		if havePlan && !plan.Legacy {
+			row.Send = s.sendView(l.Them, row.Name, plan, d.Busy)
+			if row.FlashOurs != "" {
+				set := plan.Set
+				if set == "" {
+					set = "REL-ALL"
+				}
+				row.FlashOurs = strings.TrimRight(s.cfg.FlashlightURL, "/") + "/?key=" + url.QueryEscape("from/"+s.cfg.Us+"/"+set+"/"+l.Them+"/**") + "&since=15m"
+			}
+		}
 		// Admitted on the core but still being set up here (phase 10 passed,
 		// 11-14 to go): that's progress, not a fault, so not red.
 		if p, ok := records[l.Them]; ok {
@@ -461,6 +490,59 @@ func (s *server) linkRow(l runner.LinkStatus, records map[string]store.Peering) 
 	return row
 }
 
+func (s *server) sendView(them, name string, plan runner.ReleasePlan, busy string) *sendView {
+	v := &sendView{Them: them, Name: name, Applying: busy == them+"/"+runner.SendPhase}
+	v.Busy = busy != "" && !v.Applying
+	on := plan.Send[them]
+	for _, t := range plan.Topics {
+		v.Topics = append(v.Topics, topicBox{ID: t.ID, Name: t.Name, Detail: t.Detail, On: slices.Contains(on, t.ID)})
+	}
+	if res, ok := s.run.LastSend(them); ok {
+		if res.Status == store.StatusFailed {
+			v.Failed = res.Note
+		} else {
+			v.Done = "Changed " + ago(time.Now(), res.At) + " by " + res.By
+		}
+	}
+	return v
+}
+
+func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad form.", http.StatusBadRequest)
+		return
+	}
+	them := r.PostFormValue("n")
+	name := strings.ToUpper(them)
+	if p, ok := s.st.Get(them); ok {
+		name = p.Name
+	} else if c, ok := countries[them]; ok {
+		name = c.Name
+	}
+	// Only partners the core admits: the box isn't shown for any other.
+	admitted := false
+	for _, l := range s.run.Status().Links {
+		admitted = admitted || l.Them == them
+	}
+	var err error
+	if !admitted {
+		err = errors.New("that partner isn't admitted on our core")
+	} else {
+		err = s.run.StartSend(them, name, r.PostForm["topic"], viewer(r))
+	}
+	q := url.Values{}
+	if err != nil {
+		q.Set("error", err.Error())
+	} else {
+		s.log.Info("release change started", "them", them, "topics", r.PostForm["topic"], "by", viewer(r))
+	}
+	to := "/"
+	if len(q) > 0 {
+		to += "?" + q.Encode()
+	}
+	http.Redirect(w, r, to+"#link-"+them, http.StatusSeeOther)
+}
+
 func bytesHuman(n int64) string {
 	switch {
 	case n >= 1<<30:
@@ -517,7 +599,7 @@ func (s *server) handleLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, ph := runner.Lookup(q.Get("phase")); ph == nil {
+	if _, ph := runner.Lookup(q.Get("phase")); ph == nil && q.Get("phase") != runner.SendPhase {
 		http.NotFound(w, r)
 		return
 	}

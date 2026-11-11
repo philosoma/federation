@@ -52,7 +52,7 @@
 <h2 class="section-title">Links</h2>
 <div class="link-cards">
 {{range .Links}}
-  <article class="link-card s-{{if .Chip}}{{.Chip}}{{else}}setup{{end}}">
+  <article class="link-card s-{{if .Chip}}{{.Chip}}{{else}}setup{{end}}" id="link-{{.Them}}">
     <div class="link-head">
       <h3>{{with flag .Them}}<img class="flag" src="/static/flags/{{.}}.svg" alt="">{{else}}<span class="flag flag-code" title="No flag for this code">{{upper .Them}}</span>{{end}} {{.Name}} <span class="code">{{.Them}}</span></h3>
       <span class="badge {{.Chip}}">{{.StateText}}</span>
@@ -66,6 +66,23 @@
       <div><dt>Agreement ends</dt><dd>{{if .Expires}}{{.Expires}} ({{.DaysLeft}} days){{else}}not recorded{{end}}</dd></div>
     </dl>
     {{range .Problems}}<div class="note">{{.}}</div>{{end}}
+    {{with .Send}}{{$s := .}}
+    <form class="send-form" method="post" action="/send" data-name="{{.Name}}"{{if .Applying}} data-applying{{end}}>
+      <input type="hidden" name="n" value="{{.Them}}">
+      <fieldset{{if or .Applying .Busy}} disabled{{end}}>
+        <legend>What we send</legend>
+        {{range .Topics}}<label class="topic"><input type="checkbox" name="topic" value="{{.ID}}"{{if .On}} checked{{end}}><span>{{.Name}}{{with .Detail}}<small>{{.}}</small>{{end}}</span></label>
+        {{else}}<p class="hint">No topics in the release file yet.</p>{{end}}
+      </fieldset>
+      <div class="send-foot">
+        {{if .Applying}}<span class="badge info">Applying…</span>
+        {{else}}<button class="btn primary" type="submit" hidden data-save>Save</button>{{end}}
+        {{with .Failed}}<span class="send-err">Last change failed: {{.}} <a href="/log?n={{$s.Them}}&amp;phase=send" target="_blank" rel="noopener">Log</a></span>{{end}}
+        {{with .Done}}<span class="hint">{{.}} · <a href="/log?n={{$s.Them}}&amp;phase=send" target="_blank" rel="noopener">Log</a></span>{{end}}
+        {{if .Busy}}<span class="hint">A phase is running: changes wait until it ends.</span>{{end}}
+      </div>
+    </form>
+    {{end}}
     {{end}}
     <div class="link-actions">
       {{if .FlashFrom}}<a class="btn" href="{{.FlashFrom}}" target="_blank" rel="noopener">Data from {{.Name}} ↗</a>{{end}}

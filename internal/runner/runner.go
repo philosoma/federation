@@ -42,7 +42,9 @@ type Runner struct {
 	current  string // "<them>/<phase>" while a run is in progress
 	progress Progress
 
-	status statusCache
+	status    statusCache
+	measureMu sync.Mutex            // one status check at a time
+	sends     map[string]SendResult // last "what we send" change per partner
 }
 
 // Progress is where the running phase has got to, from its "::progress N/M
