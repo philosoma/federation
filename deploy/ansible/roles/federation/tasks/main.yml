@@ -1,0 +1,282 @@
+---
+- name: federation | the settings every node must give
+  ansible.builtin.assert:
+    that: (lookup('ansible.builtin.vars', item, default='') | string | length) > 0
+    fail_msg: "Set {{ item }} in your group_vars: see the role's defaults/main.yml."
+    quiet: true
+  loop: [federation_sovereign_id, federation_edge_name, federation_edge_host, federation_edge_user, federation_config_repo, federation_contact]
+
+# Order matters: the route is written last, after the app and its login door are
+# running, so the hostname never serves anything without a login in front of it.
+
+- name: federation | Hydra must answer before a login door is added
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:4445/admin/clients?limit=1"
+    status_code: [200]
+
+- name: federation | look for the rate-limit middleware
+  ansible.builtin.command:
+    argv: [grep, -rqE, "^\\s+{{ federation_traefik_ratelimit_middleware.split('@')[0] }}:", "{{ federation_traefik_dynamic_dir }}"]
+  register: federation_ratelimit_grep
+  changed_when: false
+  failed_when: federation_ratelimit_grep.rc > 1
+
+- name: federation | rate limit available
+  ansible.builtin.set_fact:
+    federation_ratelimit_available: "{{ federation_ratelimit_grep.rc == 0 }}"
+
+# --- Login-door secrets (root only) ---------------------------------------------
+- name: federation | secrets directory
+  ansible.builtin.file:
+    path: "{{ federation_secrets_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+
+- name: federation | OIDC client secret
+  ansible.builtin.include_tasks: persisted-secret.yml
+  vars:
+    persisted_name: oidc-client-secret
+    persisted_fact: federation_effective_client_secret
+    persisted_supplied: "{{ federation_oidc_client_secret }}"
+    persisted_generate: "-hex 32"
+
+- name: federation | OIDC cookie secret
+  ansible.builtin.include_tasks: persisted-secret.yml
+  vars:
+    persisted_name: oidc-cookie-secret
+    persisted_fact: federation_effective_cookie_secret
+    persisted_supplied: "{{ federation_oidc_cookie_secret }}"
+    persisted_generate: "-hex 16"
+
+# --- What the phase scripts use (read-only in the container) ---------------------
+- name: federation | app secrets directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0750"
+  loop:
+    - "{{ federation_app_secrets_dir }}"
+    - "{{ federation_app_secrets_dir }}/goat-context"
+
+- name: federation | the operator files the phases sign and measure with
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ federation_app_secrets_dir }}/{{ item.dest }}"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  no_log: true
+  loop:
+    - {src: "{{ federation_signing_seed_src }}", dest: signing.seed}
+    - {src: "{{ federation_ca_key_src }}", dest: ca-key.pem}
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: federation | the goat operator profile
+  ansible.builtin.copy:
+    src: "{{ federation_goat_context_src }}/{{ item }}"
+    dest: "{{ federation_app_secrets_dir }}/goat-context/{{ item }}"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  no_log: true
+  loop: "{{ federation_goat_context_files }}"
+
+- name: federation | router leaf directory
+  ansible.builtin.file:
+    path: "{{ federation_app_secrets_dir }}/{{ site_id }}-leaves"
+    state: directory
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0750"
+
+- name: federation | the core router's leaf, for phase 10's core deploy
+  ansible.builtin.copy:
+    src: "{{ federation_router_leaf_src }}/{{ item }}"
+    dest: "{{ federation_app_secrets_dir }}/{{ site_id }}-leaves/{{ item }}"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  no_log: true
+  loop: "{{ federation_router_leaf_files }}"
+
+- name: federation | the app's home folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ federation_uid }}"
+    group: "{{ federation_uid }}"
+    mode: "0700"
+  loop:
+    - "{{ federation_state_dir }}/home"
+    - "{{ federation_state_dir }}/home/.goat"
+    - "{{ federation_state_dir }}/home/.goat/state"
+
+# Where the core deploy looks (~/.goat/state/<site>-leaves), pointing at the
+# read-only secrets mount inside the container.
+- name: federation | link the leaf where the core deploy looks
+  ansible.builtin.file:
+    path: "{{ federation_state_dir }}/home/.goat/state/{{ site_id }}-leaves"
+    src: "/run/secrets/federation/{{ site_id }}-leaves"
+    state: link
+    force: true
+    follow: false
+    owner: "{{ federation_uid }}"
+    group: "{{ federation_uid }}"
+
+- name: federation | deploy secrets the peering plays read
+  ansible.builtin.copy:
+    content: |
+      {% for name in federation_deploy_env %}
+      {{ name }}={{ lookup('env', name) }}
+      {% endfor %}
+    dest: "{{ federation_app_secrets_dir }}/secrets.env"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  no_log: true
+
+- name: federation | AWS credentials for the forwarder
+  ansible.builtin.copy:
+    content: |
+      [default]
+      aws_access_key_id = {{ federation_aws_access_key_id }}
+      aws_secret_access_key = {{ federation_aws_secret_access_key }}
+    dest: "{{ federation_app_secrets_dir }}/aws-credentials"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  no_log: true
+  when: federation_aws_access_key_id | length > 0
+
+# Made once and never replaced: the edge, the core and GitHub trust these.
+# Group-readable for the container's uid, which ssh-keygen -y would refuse, so
+# the public half is read from the .pub file rather than derived again.
+- name: federation | the app's SSH keys (edge and core; GitHub deploy key)
+  ansible.builtin.command:
+    argv: [ssh-keygen, -q, -t, ed25519, -N, "", -C, "federation-{{ item }}@{{ inventory_hostname }}", -f, "{{ federation_app_secrets_dir }}/{{ item }}"]
+    creates: "{{ federation_app_secrets_dir }}/{{ item }}"
+  loop: [ssh-key, github-key]
+
+- name: federation | key permissions
+  ansible.builtin.file:
+    path: "{{ federation_app_secrets_dir }}/{{ item }}"
+    owner: root
+    group: "{{ federation_uid }}"
+    mode: "0640"
+  loop: [ssh-key, github-key, ssh-key.pub, github-key.pub]
+
+- name: federation | read the public keys
+  ansible.builtin.slurp:
+    src: "{{ federation_app_secrets_dir }}/{{ item }}.pub"
+  loop: [ssh-key, github-key]
+  register: federation_pubs
+
+- name: federation | public keys
+  ansible.builtin.set_fact:
+    federation_ssh_public_key: "{{ (federation_pubs.results[0].content | b64decode).split()[:2] | join(' ') }} federation@{{ inventory_hostname }}"
+    federation_github_public_key: "{{ (federation_pubs.results[1].content | b64decode).split()[:2] | join(' ') }}"
+
+- name: federation | authorise the app's key for the core login
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user }}"
+    key: "{{ federation_ssh_public_key }}"
+    state: present
+    exclusive: false
+
+- name: federation | the GitHub deploy key to add (write) to the config repo
+  ansible.builtin.debug:
+    msg: "{{ federation_github_public_key }}"
+
+# --- The app -------------------------------------------------------------------
+- name: federation | state and compose directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ federation_state_dir }}", owner: "{{ federation_uid }}", mode: "0700"}
+    - {path: "{{ federation_compose_dir }}", owner: root, mode: "0755"}
+
+- name: federation | render docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ federation_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: federation | recreate container
+
+- name: federation | render config.json
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ federation_compose_dir }}/config.json"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: federation | recreate container
+
+- name: federation | pull image
+  community.docker.docker_image:
+    name: "{{ federation_image }}"
+    source: pull
+    force_source: true
+
+- name: federation | start the container
+  community.docker.docker_compose_v2:
+    project_src: "{{ federation_compose_dir }}"
+    state: present
+    pull: missing
+
+- name: federation | apply pending restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: federation | wait for the container to be healthy
+  ansible.builtin.command:
+    cmd: "docker inspect -f '{{ '{{' }}.State.Health.Status{{ '}}' }}' federation"
+  register: federation_health
+  retries: 20
+  delay: 3
+  until: federation_health.stdout | trim == 'healthy'
+  changed_when: false
+
+# --- The login door ------------------------------------------------------------
+- name: federation | login door
+  ansible.builtin.include_role:
+    name: oauth2-proxy-surface
+  vars:
+    oauth2_proxy_surface_name: federation
+    oauth2_proxy_surface_hostname: "{{ federation_hostname }}"
+    oauth2_proxy_surface_upstream_host: federation
+    oauth2_proxy_surface_upstream_port: 8090
+    oauth2_proxy_surface_allowed_groups: "{{ federation_allowed_groups }}"
+    oauth2_proxy_surface_client_secret: "{{ federation_effective_client_secret }}"
+    oauth2_proxy_surface_cookie_secret: "{{ federation_effective_cookie_secret }}"
+    oauth2_proxy_surface_traefik_network: "{{ federation_traefik_network }}"
+    # The page polls /api/state while a phase runs.
+    oauth2_proxy_surface_api_routes: "^/api/"
+    oauth2_proxy_surface_skip_auth_routes: "^/healthz$"
+
+# --- The route, last -----------------------------------------------------------
+- name: federation | render the Traefik route
+  ansible.builtin.template:
+    src: traefik-federation.yml.j2
+    dest: "{{ federation_traefik_dynamic_dir }}/federation.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: federation | an anonymous request must be redirected to login
+  ansible.builtin.command:
+    argv: [curl, -sk, -o, /dev/null, -m, "8", -w, "%{http_code}", --resolve, "{{ federation_hostname }}:443:{{ federation_core_address }}", "https://{{ federation_hostname }}/"]
+  register: federation_door_check
+  retries: 10
+  delay: 3
+  until: federation_door_check.stdout | trim in ['302', '303', '307']
+  changed_when: false

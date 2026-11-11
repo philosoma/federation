@@ -1,0 +1,9 @@
+/federation
+/data/
+/goatcore-src.tar.gz
+*.env
+.env
+*.key
+*.pem
+config.local.json
+__pycache__/

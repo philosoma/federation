@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{with .Sel}}{{.Name}} · {{end}}Federation</title>
+<link rel="icon" href="/static/emblem.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/federation.css">
+<script src="/static/theme.js"></script>
+<script src="/static/federation.js" defer></script>
+</head>
+<body{{with .Sel}} data-n="{{.Them}}"{{end}}{{if .Busy}} data-busy="{{.Busy}}"{{end}}>
+<header class="topbar">
+  <a class="brand" href="/" title="Federation">
+    <img class="mark" src="/static/emblem.svg" alt="" width="30" height="30">
+    <span class="brand-name">Federation</span>{{if .Flag}}<img class="site-flag" src="/static/flags/{{.Flag}}.svg" alt="">{{end}}
+  </a>
+  <nav class="tabs" aria-label="Views">
+    <a href="/"{{if eq .Tab "status"}} aria-current="page"{{end}}>Status</a>
+    <a href="/setup{{with .Sel}}?n={{.Them}}{{end}}"{{if eq .Tab "setup"}} aria-current="page"{{end}}>Setup</a>
+  </nav>
+  {{if eq .Tab "setup"}}{{with .Sel}}<span class="current">{{.Name}}</span>{{end}}{{end}}
+  <span class="spacer"></span>
+  {{if and (eq .Tab "setup") .Peerings}}
+  <details class="menu" id="fd-menu">
+    <summary>Host nations</summary>
+    <div class="menu-panel">
+      {{$sel := .Sel}}{{range .Peerings}}<a href="/setup?n={{.Them}}"{{if and $sel (eq .Them $sel.Them)}} aria-current="page"{{end}}>{{.Name}} <span class="code">{{.Them}}</span></a>{{end}}
+      <a href="/setup?new">New peering…</a>
+    </div>
+  </details>
+  {{end}}
+  <button type="button" id="sp-theme" class="theme-toggle" title="Toggle light/dark theme" aria-label="Toggle light or dark theme" hidden>☾</button>
+  {{if .Viewer}}<span class="actor" title="{{.Viewer}}">{{.Viewer}}</span>{{end}}
+</header>
+<main>
+<nav class="frame-nav" aria-label="Views"><a class="tab" href="/"{{if eq .Tab "status"}} aria-current="page"{{end}}>Status</a><a class="tab" href="/setup{{with .Sel}}?n={{.Them}}{{end}}"{{if eq .Tab "setup"}} aria-current="page"{{end}}>Setup</a>{{if eq .Tab "setup"}}<span class="sep"></span>{{$sel := .Sel}}{{range .Peerings}}<a href="/setup?n={{.Them}}"{{if and $sel (eq .Them $sel.Them)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}<a href="/setup?new">New peering…</a>{{end}}</nav>
+{{if .Error}}<div class="banner" role="alert">{{.Error}}</div>{{end}}
+
+{{if eq .Tab "status"}}
+{{with .Status}}
+<section class="hero status-hero">
+  <img class="hero-mark" src="/static/emblem.svg" alt="" width="52" height="52">
+  <div><h1>Federation links</h1><p>Every partner our core admits, measured every minute from the edge and the core.{{if .Checked}} Checked {{.Checked}}.{{else}} Checking…{{end}}</p></div>
+</section>
+<section class="tiles" aria-label="Summary">
+  <div class="card"><div class="tile-head"><span class="kicker">Federated</span><span class="badge {{if .Live}}ok{{end}}">{{if .Live}}Live{{else}}None{{end}}</span></div><div class="tile-value">{{.Live}}</div><div class="tile-detail">links up and carrying</div></div>
+  <div class="card"><div class="tile-head"><span class="kicker">Attention</span><span class="badge {{if .Attention}}err{{else}}ok{{end}}">{{if .Attention}}Look{{else}}Clear{{end}}</span></div><div class="tile-value">{{.Attention}}</div><div class="tile-detail">down or degraded</div></div>
+  <div class="card"><div class="tile-head"><span class="kicker">In setup</span><span class="badge info">Setup</span></div><div class="tile-value">{{.Setting}}</div><div class="tile-detail">working through the phases</div></div>
+</section>
+{{range .Errors}}<div class="banner">{{.}}</div>{{end}}
+<h2 class="section-title">Links</h2>
+<div class="link-cards">
+{{range .Links}}
+  <article class="link-card s-{{if .Chip}}{{.Chip}}{{else}}setup{{end}}">
+    <div class="link-head">
+      <h3>{{with flag .Them}}<img class="flag" src="/static/flags/{{.}}.svg" alt="">{{else}}<span class="flag flag-code" title="No flag for this code">{{upper .Them}}</span>{{end}} {{.Name}} <span class="code">{{.Them}}</span></h3>
+      <span class="badge {{.Chip}}">{{.StateText}}</span>
+    </div>
+    {{if .Admitted}}
+    <dl class="link-facts">
+      <div><dt>Tunnel</dt><dd>handshake {{.Handshake}}</dd></div>
+      <div><dt>Traffic</dt><dd>{{.Traffic}}</dd></div>
+      <div><dt>Edge router</dt><dd>{{.EdgeRouter}}</dd></div>
+      <div><dt>Republisher</dt><dd>{{.Republisher}}</dd></div>
+      <div><dt>Agreement ends</dt><dd>{{if .Expires}}{{.Expires}} ({{.DaysLeft}} days){{else}}not recorded{{end}}</dd></div>
+    </dl>
+    {{range .Problems}}<div class="note">{{.}}</div>{{end}}
+    {{end}}
+    <div class="link-actions">
+      {{if .FlashFrom}}<a class="btn" href="{{.FlashFrom}}" target="_blank" rel="noopener">Data from {{.Name}} ↗</a>{{end}}
+      {{if .FlashOurs}}<a class="btn" href="{{.FlashOurs}}" target="_blank" rel="noopener">What we send ↗</a>{{end}}
+      {{if .SetupLink}}<a class="btn" href="{{.SetupLink}}">Setup →</a>{{end}}
+    </div>
+  </article>
+{{else}}
+  <p class="empty">No federation links yet.</p>
+{{end}}
+</div>
+{{end}}
+{{else}}
+{{with .Sel}}{{$n := .Them}}
+<section class="peer-head">
+  <img class="hero-mark" src="/static/emblem.svg" alt="" width="52" height="52">
+  <div class="peer-title">
+    <div class="kicker">Federating {{upper $.Site}} with</div>
+    <h1 class="peer-name">{{with flag .Them}}<img class="flag flag-title" src="/static/flags/{{.}}.svg" alt="">{{else}}<span class="flag flag-title flag-code" title="No flag for this code">{{upper .Them}}</span>{{end}} {{.Name}} <span class="code big">{{.Them}}</span></h1>
+    <div class="peer-sub">{{if .WeListen}}We listen.{{with $.Endpoint}} They dial us at <code class="endpoint">{{.Address}}</code>{{if not .Reserved}} <span class="endpoint-note">(reserved when phase 1 runs)</span>{{end}}{{else}} They dial our forwarder; the port is set in phase 1.{{end}}{{else}}They listen; our edge dials them.{{end}}
+      {{if $.CanChangeListener}}<details class="listen-change"><summary>Change</summary>
+        <form method="post" action="/listen" class="listen-form">
+          <input type="hidden" name="n" value="{{.Them}}">
+          <p>Exactly one side accepts inbound UDP. If they have a public address, they listen. If both sides are behind NAT, we listen through our forwarder. Their package must say the opposite of ours. Changing this clears phases 1 to 4, so run them again.</p>
+          <select name="listen"><option value="us"{{if .WeListen}} selected{{end}}>We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them"{{if not .WeListen}} selected{{end}}>They do (we dial them)</option></select>
+          <button class="btn" type="submit">Save</button>
+        </form></details>{{end}}
+    </div>
+  </div>
+  <div class="peer-progress">
+    <a class="btn primary new-btn" href="/setup?new">+ New peering</a>
+    <span class="badge {{if eq $.Done $.Total}}ok{{else}}info{{end}}">{{if eq $.Done $.Total}}Federated{{else}}{{$.Done}} of {{$.Total}} phases{{end}}</span>
+  </div>
+</section>
+
+<ol class="phases">
+{{range $.Rows}}
+  <li class="phase s-{{if .Status}}{{.Status}}{{else}}idle{{end}}" id="{{.ID}}" data-phase="{{.ID}}">
+    <div class="phase-top">
+      <span class="pnum">{{.Num}}</span>
+      <div class="ptitle">
+        <h2>{{.Title}}{{if .Optional}} <em>optional</em>{{end}}</h2>
+        <p>{{.Does}}</p>
+      </div>
+      <span class="badge {{.Chip}}" data-status>{{.StatusText}}</span>
+      <form method="post" action="/run" class="runform"{{if .Confirm}} data-confirm="{{.Confirm}}"{{end}}>
+        <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
+        <button class="btn {{if .CanRun}}primary{{end}}" type="submit"{{if not .CanRun}} disabled title="{{.Why}}"{{end}}>{{if eq .Status "running"}}Running…{{else if .Status}}Run again{{else}}Run{{end}}</button>
+      </form>
+    </div>
+    <div class="phase-body">
+      <div class="worked">Worked when: {{.WorkedWhen}}{{if .Finished.IsZero}}{{else}} · last run {{ago $.Now .Finished}}{{if .By}} by {{.By}}{{end}}{{end}}</div>
+      {{if eq .Status "running"}}
+      <div class="progress" data-progress{{with .Progress}} data-pct="{{.Pct}}"{{end}}>
+        <div class="pbar"><span class="pfill"></span></div>
+        <div class="plabel" data-plabel>{{with .Progress}}{{if .M}}Step {{.N}} of {{.M}}: {{.Label}}{{else}}Starting{{end}} · {{.Elapsed}}{{else}}Starting{{end}}</div>
+      </div>
+      {{end}}
+      {{if .Note}}<div class="note">{{.Note}}</div>{{end}}
+      {{if or .Ours .Theirs}}
+      <div class="exchange">
+        <section class="side ours">
+          <h4>Ours <small>give these to {{.Partner}}</small></h4>
+          {{if .Ours}}<dl class="outputs">{{range .Ours}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{else}}<p class="side-empty">Not published yet.</p>{{end}}
+        </section>
+        <section class="side theirs">
+          <h4>Theirs <small>from the directory: confirm with {{.Partner}}</small></h4>
+          {{if .Theirs}}<dl class="outputs">{{range .Theirs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{else}}<p class="side-empty">Not on the directory yet.</p>{{end}}
+        </section>
+      </div>
+      {{end}}
+      {{if .Outputs}}
+      <dl class="outputs">{{range .Outputs}}<div><dt>{{label .Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>
+      {{end}}
+      {{if .ShowAfter}}
+      <form method="post" action="/record" class="after">
+        <input type="hidden" name="n" value="{{$n}}"><input type="hidden" name="phase" value="{{.ID}}">
+        {{range .After}}
+          {{if eq .Kind "check"}}<label class="check"><input type="checkbox" name="{{.Key}}"><span>{{.Label}}</span></label>
+          {{else}}<label class="field">{{.Label}}<input name="{{.Key}}" autocomplete="off" spellcheck="false">{{if .Hint}}<small>{{.Hint}}</small>{{end}}</label>{{end}}
+        {{end}}
+        <div><button class="btn primary" type="submit">Record and continue</button></div>
+      </form>
+      {{end}}
+      {{if .Confirm}}<dl class="outputs recorded">{{range .Confirm}}<div><dt>{{.Key}}</dt><dd><code>{{.Value}}</code></dd></div>{{end}}</dl>{{end}}
+      {{if .Status}}
+      <details class="log"{{if .OpenLog}} open{{end}}>
+        <summary>Log <a href="/log?n={{$n}}&amp;phase={{.ID}}" target="_blank" rel="noopener">full ↗</a></summary>
+        <pre data-log>{{.Log}}</pre>
+      </details>
+      {{end}}
+    </div>
+  </li>
+{{end}}
+</ol>
+
+<details class="danger">
+  <summary>Delete this peering's record</summary>
+  <form method="post" action="/delete" class="danger-form">
+    <input type="hidden" name="n" value="{{.Them}}">
+    <label>Type <code>{{.Them}}</code> to delete the record and logs here. It doesn't touch the edge, the core or the agreement.<input name="confirm" autocomplete="off" spellcheck="false"></label>
+    <button class="btn danger-btn" type="submit">Delete record</button>
+  </form>
+</details>
+{{end}}
+
+<section id="new" class="{{if .Sel}}new-later{{else}}new-first{{end}}">
+  {{if not .Sel}}
+  <div class="hero">
+    <img class="hero-mark" src="/static/emblem.svg" alt="" width="72" height="72">
+    <div><h1>Federation</h1><p>Peer our goatnet with a host nation's. Each side runs the same fourteen phases; people decide what flows and confirm each other's codes. Everything else is a Run button.</p></div>
+  </div>
+  {{end}}
+  <h2 class="section-title">{{if .Sel}}Start another peering{{else}}Start a new peering{{end}}</h2>
+  <form class="card new-form" method="post" action="/peerings">
+    <label>Their code<input name="them" required pattern="[a-z0-9][a-z0-9\-]{1,15}" placeholder="can" autocomplete="off" spellcheck="false"><small>Usually the ISO alpha-3 country code, lower case (can, usa). Codes that aren\'t countries (uk1) show their code instead of a flag.</small></label>
+    <label>Name<input name="name" placeholder="Canada" maxlength="80"></label>
+    <label>Who listens?<select name="listen"><option value="us">We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them">They do (we dial them)</option></select><small>One side accepts inbound UDP. A partner with a public address listens; if both are behind NAT, we listen through our forwarder.</small></label>
+    <div class="form-actions"><button class="btn primary" type="submit">Engage</button></div>
+  </form>
+</section>
+{{end}}
+</main>
+<footer>Federation {{.Version}} · {{.Site}} · Make it so.</footer>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "site": { "name": "Example goatnet", "flag": "gb" },
+  "sovereign_id": "gbr",
+  "auth": { "required_groups": ["PLATFORM-ADMIN"] },
+  "public_name": "fed.example.org",
+  "flashlight_url": "https://flashlight.example.org",
+  "frame_ancestors": ["https://signpost.example.org"],
+  "state": "/var/lib/federation"
+}

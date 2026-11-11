@@ -1,0 +1,5 @@
+---
+- name: federation | recreate container
+  community.docker.docker_compose_v2:
+    project_src: "{{ federation_compose_dir }}"
+    state: restarted

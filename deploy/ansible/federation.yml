@@ -1,0 +1,52 @@
+---
+# Deploys Federation to a goatnet core host and gives it access to the
+# peering edge. Copy this file and roles/federation into the goatcore
+# ops/ansible directory first: see README.md.
+#
+#   ansible-playbook -i inventory/mgmt-hosts.ini -i inventory/peering-edges.ini \
+#     federation.yml -e target=<site>_hosts
+
+- name: federation | deploy
+  hosts: "{{ target | mandatory }}"
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: federation | refuse to apply the placeholder image
+      ansible.builtin.fail:
+        msg: >-
+          federation_image is still "{{ federation_image }}". Set it in group_vars
+          to the pushed digest: ghcr.io/<owner>/federation@sha256:<digest>
+      when: federation_image is search('sha-placeholder')
+  roles:
+    - federation
+
+# The app logs in to the edge with its own key and passwordless sudo, which the
+# peering plays need (become). Its public key comes from the core, above.
+- name: federation | edge access
+  hosts: peering_edges
+  become: true
+  gather_facts: false
+  tasks:
+    - name: federation | authorise the app's key on the edge
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ hostvars[groups[target][0]].federation_ssh_public_key }}"
+        state: present
+        exclusive: false
+
+    - name: federation | passwordless sudo for the edge login, for the peering plays
+      ansible.builtin.copy:
+        content: |
+          # Federation (on {{ groups[target][0] }}) runs the peering plays here with become.
+          {{ ansible_user }} ALL=(ALL) NOPASSWD:ALL
+        dest: /etc/sudoers.d/90-federation
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: federation | sudoers files from a manual setup, replaced by the rule above
+      ansible.builtin.file:
+        path: "/etc/sudoers.d/{{ item }}"
+        state: absent
+      loop: "{{ hostvars[groups[target][0]].federation_edge_sudoers_remove | default([]) }}"

@@ -1,0 +1,65 @@
+---
+federation_image: "ghcr.io/philosoma/federation:sha-placeholder"
+federation_site_name: "{{ site_id | upper | mandatory }}"
+federation_site_flag: ""          # ISO 3166-1 alpha-2 for the header, e.g. gb
+# Required, set in your group_vars (the role refuses to run without them):
+#   federation_sovereign_id   your goatnet's sovereign id, usually ISO alpha-3 lower case
+#   federation_edge_name      the edge host's inventory name
+#   federation_edge_host      the edge host's mesh address
+#   federation_edge_user      the edge's SSH login (the play gives it passwordless sudo)
+#   federation_config_repo    git URL of your config overlay; add the deploy key the play prints, with write access
+#   federation_contact        the email partners use to reach you about a link
+federation_hostname: "federation.{{ site_id | mandatory }}.{{ site_dns_zone | mandatory }}"
+federation_compose_dir: /opt/federation
+federation_state_dir: /var/lib/federation
+federation_image_platform: "linux/{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}"
+# Origins allowed to show Federation in a frame. Signpost opens apps in a frame under its header.
+federation_frame_ancestors:
+  - "https://signpost.{{ site_id }}.{{ site_dns_zone }}"
+# The Status view links each partner's data in Flashlight.
+federation_flashlight_url: "https://flashlight.{{ site_id }}.{{ site_dns_zone }}"
+# The core, as the app reaches it over your mesh (this host by default).
+federation_core_name: "{{ inventory_hostname }}"
+federation_core_host: "{{ mesh_ip_a | mandatory }}"
+federation_core_user: "{{ ansible_user }}"
+# The peering forwarder's public name, when your side listens behind NAT (ADR 1218).
+federation_public_name: ""
+federation_fips_waiver: "FIPS 140 not required for this link"
+# Sudoers files from a manual setup that the play's rule replaces, if any.
+federation_edge_sudoers_remove: []
+# Phases change production, so only platform admins.
+federation_allowed_groups: PLATFORM-ADMIN
+federation_oidc_client_secret: ""
+federation_oidc_cookie_secret: ""
+# Login-door secrets (root only).
+federation_secrets_dir: /etc/goat/federation
+# What the scripts use, mounted read-only into the container (uid 65532).
+federation_app_secrets_dir: /etc/goat/federation/app
+federation_uid: 65532
+
+# Copied from the operator machine running this play. The CA key is stored on
+# the node, so phases run without anyone handing it over. Weigh that against your
+# own key policy before you deploy.
+federation_signing_seed_src: "{{ lookup('env', 'HOME') }}/.goat/federation/{{ federation_sovereign_id }}-signing.seed"
+federation_ca_key_src: "/dev/shm/{{ site_id }}-ca-key.pem"
+federation_goat_context_src: "{{ lookup('env', 'HOME') }}/.goat/contexts/{{ site_id }}"
+federation_goat_context_files: [profile.toml, mtls.cert.pem, mtls.key.pem, ca-roots.pem, bundle.cbor, portal.token]
+# The core router's TLS leaf: phase 10's core deploy refuses (GB-071) without it on
+# the controller, read from ~/.goat/state/<site>-leaves. It already lives on this
+# host, in the router's own config.
+federation_router_leaf_src: "{{ lookup('env', 'HOME') }}/.goat/state/{{ site_id }}-leaves"
+federation_router_leaf_files: [router-cert.pem, router-key.pem]
+# The only deploy secret the peering plays read (the core deploy's slot-pool salt).
+federation_deploy_env:
+  - "{{ site_id | upper | replace('-', '_') }}_SLOT_POOL_SALT"
+# A limited AWS user for the forwarder (SSM). Empty: the forwarder step fails with a reason.
+federation_aws_access_key_id: "{{ lookup('env', 'FEDERATION_AWS_ACCESS_KEY_ID') }}"
+federation_aws_secret_access_key: "{{ lookup('env', 'FEDERATION_AWS_SECRET_ACCESS_KEY') }}"
+
+federation_traefik_cert_resolver: "{{ portal_traefik_cert_resolver | default('le') }}"
+federation_traefik_mesh_only_middleware: "{{ portal_traefik_mesh_only_middleware | default('mesh-only-allowlist@file') }}"
+federation_traefik_ratelimit_middleware: "goat-ratelimit@file"
+federation_traefik_network: mgmt
+federation_traefik_dynamic_dir: /etc/traefik/dynamic
+federation_traefik_router_name: federation
+federation_core_address: "{{ mesh_ip_a | mandatory }}"

@@ -1,0 +1,9 @@
+{
+  "site": {"name": {{ federation_site_name | to_json }}, "flag": {{ federation_site_flag | to_json }}},
+  "auth": {"required_groups": {{ federation_allowed_groups.split(',') | map('trim') | select | list | to_json }}},
+  "sovereign_id": {{ federation_sovereign_id | to_json }},
+  "frame_ancestors": {{ federation_frame_ancestors | to_json }},
+  "flashlight_url": {{ federation_flashlight_url | to_json }},
+  "public_name": {{ federation_public_name | to_json }},
+  "state": "/var/lib/federation"
+}

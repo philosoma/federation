@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: federation
+  description: Federation, the phase-by-phase runner for peering with a host nation.
+  license: proprietary
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies:
+  - role: rollback-ledger
+    vars:
+      rollback_component: federation
+      rollback_artifact_type: image
+      rollback_ref: "{{ federation_image }}"
