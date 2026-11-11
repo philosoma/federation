@@ -2,7 +2,11 @@
 // keeps its log, so the page can show progress and, on a failure, why.
 package runner
 
-import "embed"
+import (
+	"embed"
+
+	"github.com/philosoma/federation/internal/store"
+)
 
 //go:embed scripts/*
 var scripts embed.FS
@@ -100,11 +104,79 @@ var Phases = []Phase{
 	},
 }
 
-// Lookup finds a phase by id.
+// GBPhases is the page for a peering driven by `goatbuilder federate`
+// (goatbuilder 0.5.1): the same fourteen phases, run by one command that stops
+// where a person has to confirm or approve. Values are passed as flags.
+var GBPhases = []Phase{
+	{
+		ID: "g1", Num: "—", Title: "Allocate",
+		Does:       "Declares the peering in goatbuilder.yaml, then lets goatbuilder choose its interface, ports and subnet and render its files, and commits them to the config.",
+		WorkedWhen: "the peering's values are committed",
+		Script:     "gb-allocate.sh",
+	},
+	{
+		ID: "g2", Num: "1–5", Title: "Exchange and confirm",
+		Does:       "Checks our side, measures and signs our package, and swaps packages with them through the directory. Then read the codes aloud with them.",
+		WorkedWhen: "both sides read every code back correctly",
+		Script:     "gb-exchange.sh",
+		After: []Field{
+			{Key: "their_key", Label: "Their verifying key, as they read it to you", Kind: "text", Hint: "44 characters ending in ="},
+			{Key: "ours_confirmed", Label: "They confirmed our verifying key and CA fingerprint", Kind: "check"},
+			{Key: "theirs_confirmed", Label: "Their CA fingerprint above matches what they read out", Kind: "check"},
+		},
+	},
+	{
+		ID: "g3", Num: "6–9", Title: "Agreement",
+		Does:       "Composes and verifies the agreement. Then read its digest to each other.",
+		WorkedWhen: "one digest, identical on both sides",
+		Script:     "gb-agreement.sh",
+		After: []Field{
+			{Key: "digest_matched", Label: "They read the same agreement digest", Kind: "check"},
+		},
+	},
+	{
+		ID: "g4", Num: "plan", Title: "Plan and admission",
+		Does:       "Mints and renders everything, writes the bounded plan and shows what our core will admit. Changes no host. Read both, then approve.",
+		WorkedWhen: "a plan with no conflicts, and an admission of exactly two new names",
+		Script:     "gb-plan.sh",
+		After: []Field{
+			{Key: "plan_ok", Label: "I read the plan: no conflicts, nothing touches another peering", Kind: "check"},
+			{Key: "admission_ok", Label: "I approve what our core admits: only the edge and the republisher are new", Kind: "check"},
+		},
+	},
+	{
+		ID: "g5", Num: "10–13", Title: "Deploy",
+		Does:       "Carries out the approved plan: admits the edge on our core (the router restarts), opens the tunnel, deploys the edge router and republisher.",
+		WorkedWhen: "the edge dials our core; the republisher is linked",
+		Script:     "gb-deploy.sh",
+		Confirm:    "This changes production: our core router restarts and every fabric client drops for a few seconds. Deploy the approved plan now?",
+	},
+	{
+		ID: "g6", Num: "14", Title: "Acceptance",
+		Does:       "Runs our half of acceptance against our core and edge. A required check counts only on PASS; their half comes in through a shared session.",
+		WorkedWhen: "PASS, or INCOMPLETE waiting only on their half",
+		Script:     "gb-test.sh",
+		After: []Field{
+			{Key: "theirs_passed", Label: "They confirmed their acceptance passed too", Kind: "check"},
+		},
+	},
+}
+
+// PhasesFor is the page for a peering's method.
+func PhasesFor(method string) []Phase {
+	if method == store.MethodGoatbuilder {
+		return GBPhases
+	}
+	return Phases
+}
+
+// Lookup finds a phase by id, in either list; the index is within its list.
 func Lookup(id string) (int, *Phase) {
-	for i := range Phases {
-		if Phases[i].ID == id {
-			return i, &Phases[i]
+	for _, list := range [][]Phase{Phases, GBPhases} {
+		for i := range list {
+			if list[i].ID == id {
+				return i, &list[i]
+			}
 		}
 	}
 	return -1, nil

@@ -36,7 +36,10 @@ fi
 links=$(python3 - "$CFG" "$FED_SITE" <<'PY'
 import os, re, sys
 cfg, site = sys.argv[1], sys.argv[2]
-sp = os.path.join(cfg, "ops/ansible/group_vars", f"{site.replace('-', '_')}_hosts", "sovereign-peerings.yml")
+gv = os.path.join(cfg, "ops/ansible/group_vars", f"{site.replace('-', '_')}_hosts")
+sp = os.path.join(gv, "peerings.yml")  # goatbuilder 0.5's file; sovereign-peerings.yml before it
+if not os.path.exists(sp):
+    sp = os.path.join(gv, "sovereign-peerings.yml")
 text = open(sp).read() if os.path.exists(sp) else ""
 ends = {m.group(1).lower(): (m.group(2), m.group(3)) for m in re.finditer(r"^#\s+([A-Z0-9][A-Z0-9-]{1,15})\s+(sha256:[0-9a-f]+)[^\n]*?through (\d{4}-\d{2}-\d{2})", text, re.M)}
 for them in re.findall(r"^\s*- sovereign:\s*([a-z0-9-]+)", text, re.M):
@@ -50,6 +53,13 @@ PY
 ifaces=$(echo "$links" | awk 'NF{print $2}' | sort -u | tr '\n' ' ')
 edge=$(ssh "$FED_EDGE_USER@$FED_EDGE_HOST" "now=\$(date +%s); echo now \$now; for i in $ifaces; do echo hs \$i \$(sudo -n wg show \$i latest-handshakes 2>/dev/null | awk '{print \$2}' | sort -n | tail -1); echo tr \$i \$(sudo -n wg show \$i transfer 2>/dev/null | awk '{r+=\$2; t+=\$3} END{print r+0, t+0}'); done; sudo -n docker ps --format 'ctr {{.Names}} {{.Status}}' | grep goat-zenoh-edge-; true" 2>/dev/null) || errors+=("edge: unreachable")
 core=$(ssh "$FED_CORE_USER@$FED_CORE_HOST" "sudo -n docker ps --format 'ctr {{.Names}} {{.Status}}' | grep goat-fed-republisher-; true" 2>/dev/null) || errors+=("core: unreachable")
+
+# What goatbuilder federate recorded for the peerings it runs (read-only).
+if command -v goatbuilder >/dev/null && [ -d "$FED_STATE/gb" ]; then
+	FED_WORK_ROOT=$FED_STATE/gb goatbuilder federate status -o json -C "$CFG" --color never >"$FED_STATE/gb-status.json.tmp" 2>/dev/null \
+		&& mv "$FED_STATE/gb-status.json.tmp" "$FED_STATE/gb-status.json"
+	rm -f "$FED_STATE/gb-status.json.tmp"
+fi
 
 python3 - "$links" "$edge" "$core" "${errors[@]+"${errors[@]}"}" <<'PY'
 import json, sys, time

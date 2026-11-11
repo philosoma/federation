@@ -42,7 +42,7 @@ func newTest(t *testing.T, groups []string) (http.Handler, *store.Store, *runner
 	}
 	// Stand-in scripts: each prints a line and passes, without touching a host.
 	fake := fstest.MapFS{}
-	for _, ph := range runner.Phases {
+	for _, ph := range append(append([]runner.Phase{}, runner.Phases...), runner.GBPhases...) {
 		fake["scripts/"+ph.Script] = &fstest.MapFile{Data: []byte("echo \"$FED_THEM $FED_US\"\necho '::show digest=sha256: 0000'\necho '::show our_key=xlBt YGcA'\necho '::show their_key=v56n Mz4/'\n")}
 	}
 	rn, err := runner.NewWithScripts(st, dir, "gbr", []string{"PATH=/usr/bin:/bin"}, log, fake)
@@ -95,10 +95,10 @@ func TestFlow(t *testing.T) {
 	if w := do(h, "GET", "/setup", nil, nil); w.Code != 200 || !strings.Contains(w.Body.String(), "Start a new peering") {
 		t.Fatalf("empty page: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}, "name": {"Canada"}, "listen": {"us"}}, nil); w.Code != http.StatusSeeOther {
+	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}, "name": {"Canada"}, "listen": {"us"}}, nil); w.Code != http.StatusSeeOther {
 		t.Fatalf("create: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"them": {"Canada!"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"Canada!"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
 		t.Fatal("bad code accepted")
 	}
 	page := do(h, "GET", "/setup?n=can", nil, nil).Body.String()
@@ -167,7 +167,7 @@ func TestFlow(t *testing.T) {
 
 func TestListenerChangeClearsRuns(t *testing.T) {
 	h, st, rn := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "listen": {"us"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "listen": {"us"}}, nil)
 	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"p1"}}, nil)
 	wait(t, rn)
 	do(h, "POST", "/listen", url.Values{"n": {"usa"}, "listen": {"them"}}, nil)
@@ -179,7 +179,7 @@ func TestListenerChangeClearsRuns(t *testing.T) {
 
 func TestStatusPage(t *testing.T) {
 	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
 	w := do(h, "GET", "/", nil, nil)
 	body := w.Body.String()
 	if w.Code != 200 || !strings.Contains(body, "Federation links") || !strings.Contains(body, "In setup: 0 of 8 phases") {
@@ -195,8 +195,8 @@ func TestFlags(t *testing.T) {
 		t.Fatal("ca.svg not bundled")
 	}
 	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}}, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"uk1"}, "name": {"Test"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"usa"}, "name": {"United States"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"uk1"}, "name": {"Test"}}, nil)
 	body := do(h, "GET", "/", nil, nil).Body.String()
 	if !strings.Contains(body, `src="/static/flags/us.svg"`) || !strings.Contains(body, `flag-code" title="No flag for this code">UK1<`) {
 		t.Fatalf("flags on the status page:\n%s", body)
@@ -205,7 +205,7 @@ func TestFlags(t *testing.T) {
 
 func TestEndpointShown(t *testing.T) {
 	h, _, rn := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"est"}, "name": {"Estonia"}, "listen": {"us"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}, "listen": {"us"}}, nil)
 	// No config clone in the test, so no guess: the page says phase 1 sets it.
 	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, "the port is set in phase 1") {
 		t.Fatal("no fallback line before phase 1")
@@ -225,7 +225,7 @@ func TestEndpointShown(t *testing.T) {
 
 func TestSetupTitleFlag(t *testing.T) {
 	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"est"}, "name": {"Estonia"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}}, nil)
 	if body := do(h, "GET", "/setup?n=est", nil, nil).Body.String(); !strings.Contains(body, `class="flag flag-title" src="/static/flags/ee.svg"`) {
 		t.Fatal("no flag in the Setup title")
 	}
@@ -233,7 +233,7 @@ func TestSetupTitleFlag(t *testing.T) {
 
 func TestNewPeeringPage(t *testing.T) {
 	h, _, _ := newTest(t, nil)
-	do(h, "POST", "/peerings", url.Values{"them": {"est"}, "name": {"Estonia"}}, nil)
+	do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"est"}, "name": {"Estonia"}}, nil)
 	body := do(h, "GET", "/setup?new", nil, nil).Body.String()
 	if strings.Contains(body, "Agreement and certificates") || !strings.Contains(body, "Start a new peering") {
 		t.Fatal("/setup?new should show only the new-peering form")
@@ -245,13 +245,13 @@ func TestNewPeeringPage(t *testing.T) {
 
 func TestCrossSiteRefused(t *testing.T) {
 	h, _, _ := newTest(t, nil)
-	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Sec-Fetch-Site": "cross-site"}); w.Code != http.StatusForbidden {
+	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Sec-Fetch-Site": "cross-site"}); w.Code != http.StatusForbidden {
 		t.Fatalf("cross-site: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
+	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
 		t.Fatalf("origin: %d", w.Code)
 	}
-	if w := do(h, "POST", "/peerings", url.Values{"them": {"can"}}, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "null"}); w.Code != http.StatusSeeOther {
+	if w := do(h, "POST", "/peerings", url.Values{"method": {"legacy"}, "them": {"can"}}, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "null"}); w.Code != http.StatusSeeOther {
 		t.Fatalf("same-origin form: %d", w.Code)
 	}
 }
@@ -317,4 +317,37 @@ func TestWhatWeSend(t *testing.T) {
 	if res, ok := rn.LastSend("can"); !ok || res.Status != "passed" {
 		t.Fatalf("last send: %+v", res)
 	}
+}
+
+func TestGoatbuilderFlow(t *testing.T) {
+	h, st, rn := newTest(t, nil)
+	do(h, "POST", "/peerings", url.Values{"them": {"usa"}, "name": {"United States"}, "listen": {"them"}}, nil)
+	p, _ := st.Get("usa")
+	if p.Method != store.MethodGoatbuilder {
+		t.Fatalf("a new peering should use goatbuilder: %q", p.Method)
+	}
+	body := do(h, "GET", "/setup?n=usa", nil, nil).Body.String()
+	for _, want := range []string{"Allocate", "Plan and admission", "Deploy"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("goatbuilder rows missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Admit the edge on our core") {
+		t.Fatal("legacy rows shown for a goatbuilder peering")
+	}
+	// The rows run in order, and g2's codes are recorded before g3 can run.
+	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g1"}}, nil)
+	wait(t, rn)
+	do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g2"}}, nil)
+	wait(t, rn)
+	if w := do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g3"}}, nil); !strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatal("g3 ran before g2 was confirmed")
+	}
+	if w := do(h, "POST", "/record", url.Values{"n": {"usa"}, "phase": {"g2"}, "their_key": {"v56nMz4/abcdefghijklmnopqrstuvwxyzABCDEFGHI="}, "ours_confirmed": {"on"}, "theirs_confirmed": {"on"}}, nil); strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatalf("record g2: %s", w.Header().Get("Location"))
+	}
+	if w := do(h, "POST", "/run", url.Values{"n": {"usa"}, "phase": {"g3"}}, nil); strings.Contains(w.Header().Get("Location"), "error=") {
+		t.Fatalf("g3 refused after g2: %s", w.Header().Get("Location"))
+	}
+	wait(t, rn)
 }

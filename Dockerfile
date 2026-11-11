@@ -18,7 +18,8 @@ WORKDIR /src/goatcore/crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/goatcore/crates/target \
     cargo build --release --locked -p goat-cli -p goatbuilder \
-    && install -m0755 target/release/goat target/release/goatbuilder /usr/local/bin/
+    && install -m0755 target/release/goat /usr/local/bin/goat \
+    && install -m0755 target/release/goatbuilder /usr/local/bin/goatbuilder-legacy
 
 FROM golang:1.26-trixie AS app
 ARG VERSION=dev
@@ -49,7 +50,20 @@ RUN arch=$([ "$TARGETARCH" = arm64 ] && echo arm64 || echo 64bit) \
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 # Preflight requires compose (the edge role deploys with `docker compose`).
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
-COPY --from=goat /usr/local/bin/goat /usr/local/bin/goatbuilder /usr/local/bin/
+# The patched goat and goatbuilder drive the peerings set up before goatbuilder 0.5
+# (Canada, Estonia): `goat federate` until it's removed (about 2026-12-11).
+COPY --from=goat /usr/local/bin/goat /usr/local/bin/goatbuilder-legacy /usr/local/bin/
+# The released goatbuilder drives new peerings (`goatbuilder federate`). The digest
+# is SHA256SUMS of the release, whose keyless cosign signature by goatcore's release
+# workflow was verified when this was pinned.
+ARG GOATBUILDER_VERSION=0.5.1
+ARG GOATBUILDER_SHA256_ARM64=9c53d576dc0ce5eb5eb30a01fc28d3f607c35c975553d3187e9f3bd8d2b36d48
+RUN [ "$TARGETARCH" = arm64 ] || { echo "goatbuilder is pinned for arm64 only; add the $TARGETARCH digest" >&2; exit 1; } \
+    && curl -fsSL -o /usr/local/bin/goatbuilder \
+         "https://github.com/USAREUR-AF/goatcore/releases/download/goatbuilder/v${GOATBUILDER_VERSION}/goatbuilder-linux-arm64" \
+    && echo "${GOATBUILDER_SHA256_ARM64}  /usr/local/bin/goatbuilder" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/goatbuilder \
+    && goatbuilder --version
 COPY --from=app /out/federation /app/federation
 
 ENV PATH=/opt/ansible/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \

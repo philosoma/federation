@@ -490,3 +490,4 @@ input:focus, select:focus { outline: 2px solid var(--green-hi); outline-offset: 
 .send-err { color: var(--err-text); }
 .send-form .hint { color: var(--fog-2); margin: 0; }
 [hidden] { display: none !important; }
+.gb-status { margin: 1em 0; padding: 12px 14px; }

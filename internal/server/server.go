@@ -80,6 +80,7 @@ func New(cfg Config, st *store.Store, run *runner.Runner, version string, log *s
 	app.HandleFunc("POST /delete", s.handleDelete)
 	app.HandleFunc("POST /listen", s.handleListen)
 	app.HandleFunc("POST /send", s.handleSend)
+	app.HandleFunc("POST /backout", s.handleBackout)
 	app.HandleFunc("GET /log", s.handleLog)
 	app.Handle("GET /static/", http.StripPrefix("/static/", cacheStatic(http.FileServerFS(static))))
 
@@ -177,9 +178,16 @@ type pageData struct {
 	Rows                               []row
 	Done, Total                        int
 	CanChangeListener                  bool
+	Backout                            *backoutView
+	GB                                 *runner.GBStatus
 	Endpoint                           *runner.Endpoint
 	Now                                time.Time
 	Status                             *statusView
+}
+
+type backoutView struct {
+	Running, Busy bool
+	Last, Note    string
 }
 
 type row struct {
@@ -254,6 +262,17 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.Sel != nil {
 		d.Rows, d.Done, d.Total = s.rows(d.Sel, d.Busy)
+		if d.Sel.Method == store.MethodGoatbuilder {
+			b := &backoutView{Running: d.Busy == d.Sel.Them+"/"+runner.BackoutPhase, Busy: d.Busy != ""}
+			if res, ok := s.run.LastBackout(d.Sel.Them); ok {
+				b.Last = fmt.Sprintf("%s %s by %s", map[bool]string{true: "Passed", false: "Failed"}[res.Status == store.StatusPassed], ago(time.Now(), res.At), res.By)
+				b.Note = res.Note
+			}
+			d.Backout = b
+			if g, ok := s.run.GoatbuilderStatus(d.Sel.Them); ok {
+				d.GB = &g
+			}
+		}
 		p5 := d.Sel.Runs["p5"]
 		d.CanChangeListener = d.Busy == "" && (p5 == nil || p5.Status != store.StatusPassed)
 		if d.Sel.WeListen && s.cfg.PublicName != "" {
@@ -266,7 +285,7 @@ func (s *server) handlePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total int) {
-	for _, ph := range runner.Phases {
+	for _, ph := range runner.PhasesFor(p.Method) {
 		run := p.Runs[ph.ID]
 		if run == nil {
 			run = &store.Run{}
@@ -591,7 +610,7 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		Busy   string       `json:"busy"`
 		Phases []phaseState `json:"phases"`
 	}{Busy: s.run.Busy()}
-	for _, ph := range runner.Phases {
+	for _, ph := range runner.PhasesFor(p.Method) {
 		st := phaseState{ID: ph.ID}
 		if run := p.Runs[ph.ID]; run != nil {
 			st.Status = run.Status
@@ -611,7 +630,7 @@ func (s *server) handleLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, ph := runner.Lookup(q.Get("phase")); ph == nil && q.Get("phase") != runner.SendPhase {
+	if _, ph := runner.Lookup(q.Get("phase")); ph == nil && q.Get("phase") != runner.SendPhase && q.Get("phase") != runner.BackoutPhase {
 		http.NotFound(w, r)
 		return
 	}
@@ -639,7 +658,11 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = strings.ToUpper(them)
 	}
-	if err := s.st.Create(them, name, r.PostFormValue("listen") != "them"); err != nil {
+	method := store.MethodGoatbuilder
+	if r.PostFormValue("method") == "legacy" {
+		method = ""
+	}
+	if err := s.st.Create(them, name, r.PostFormValue("listen") != "them", method); err != nil {
 		back(w, r, "", err)
 		return
 	}
@@ -700,6 +723,31 @@ func (s *server) handleListen(w http.ResponseWriter, r *http.Request) {
 	err := s.st.SetListener(them, weListen)
 	if err == nil {
 		s.log.Info("listener changed", "them", them, "we_listen", weListen, "by", viewer(r))
+	}
+	back(w, r, them, err)
+}
+
+// handleBackout surveys (dry) or backs out one goatbuilder peering. The real
+// one needs the partner's code typed, as goatbuilder asks at a terminal.
+func (s *server) handleBackout(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad form.", http.StatusBadRequest)
+		return
+	}
+	them := r.PostFormValue("n")
+	dry := r.PostFormValue("dry") == "1"
+	p, ok := s.st.Get(them)
+	if !ok {
+		back(w, r, "", errors.New("no such peering"))
+		return
+	}
+	if !dry && r.PostFormValue("confirm") != them {
+		back(w, r, them, fmt.Errorf("type %s to back it out", them))
+		return
+	}
+	err := s.run.StartBackout(them, p.Name, dry, viewer(r))
+	if err == nil {
+		s.log.Info("backout started", "them", them, "dry", dry, "by", viewer(r))
 	}
 	back(w, r, them, err)
 }

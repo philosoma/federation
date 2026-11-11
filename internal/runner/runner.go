@@ -118,11 +118,12 @@ func (r *Runner) Busy() string {
 // CanRun says whether a phase may start: every earlier phase that isn't
 // optional has passed.
 func CanRun(p *store.Peering, phaseID string) (bool, string) {
-	i, _ := Lookup(phaseID)
-	if i < 0 {
+	i, ph := Lookup(phaseID)
+	list := PhasesFor(p.Method)
+	if i < 0 || i >= len(list) || list[i].ID != ph.ID {
 		return false, "unknown phase"
 	}
-	for _, ph := range Phases[:i] {
+	for _, ph := range list[:i] {
 		if ph.Optional {
 			continue
 		}
@@ -340,6 +341,19 @@ func (r *Runner) peeringEnv(p *store.Peering, work string) []string {
 		"FED_WORK=" + work,
 		"FED_STATE=" + r.root,
 		"FED_SCRIPTS=" + filepath.Join(r.root, "scripts"),
+	}
+	env = append(env, "FED_METHOD="+p.Method)
+	if run := p.Runs["g2"]; run != nil && run.Confirm != nil && run.Confirm["their_key"] != "" {
+		env = append(env, "FED_THEIR_KEY="+run.Confirm["their_key"])
+	}
+	if run := p.Runs["g2"]; run != nil && run.Outputs["their_ca"] != "" {
+		env = append(env, "FED_THEIR_CA="+run.Outputs["their_ca"])
+	}
+	if run := p.Runs["g3"]; run != nil && run.Status == store.StatusPassed {
+		env = append(env, "FED_DIGEST="+run.Outputs["digest"])
+	}
+	if run := p.Runs["g4"]; run != nil && run.Status == store.StatusPassed {
+		env = append(env, "FED_PLAN_HASH="+run.Outputs["plan_hash"], "FED_ADMISSION_DIGEST="+run.Outputs["admission_digest"])
 	}
 	if run := p.Runs["p5"]; run != nil && run.Confirm != nil {
 		// Older records typed their key in; newer ones confirm the one fetched.

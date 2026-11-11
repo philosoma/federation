@@ -31,7 +31,7 @@ export FED_WORK=$W FED_DIRECTORY_URL FED_COUNTERPARTY_ID=$THEM FED_SIGNING_KEY=$
 export FED_CA_CERT=$(our_ca_cert) FED_CA_KEY=$CA_KEY
 export FED_ROUTER_DOCKER_HOST=ssh://$CORE
 cd "$TREE"
-out=$(goatbuilder federate "$THEM" -C . --offline --as "$US" --to 1 --yes 2>&1) || {
+out=$(goatbuilder-legacy federate "$THEM" -C . --offline --as "$US" --to 1 --yes 2>&1) || {
 	echo "$out"
 	first=$(echo "$out" | sed -n 's/^\[✗\] *//p' | head -1)
 	die "Preflight refused: ${first:-see the log}"

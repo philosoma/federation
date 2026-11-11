@@ -182,6 +182,26 @@
 {{end}}
 </ol>
 
+{{with $.GB}}<section class="card gb-status"><span class="kicker">goatbuilder federate status</span>
+  <dl class="link-facts">{{with .LastRun}}<div><dt>Last run</dt><dd>{{.}}</dd></div>{{end}}{{with .Next}}<div><dt>Next</dt><dd><code>{{.}}</code></dd></div>{{end}}{{with .Acceptance}}<div><dt>Acceptance</dt><dd>{{.}}</dd></div>{{end}}</dl>
+</section>{{end}}
+{{with $.Backout}}{{$them := $.Sel.Them}}
+<details class="danger"{{if or .Running .Last}} open{{end}}>
+  <summary>Back out this peering (goatbuilder)</summary>
+  <p class="hint">Removes {{$them}}'s tunnel, SPIRE federation, edge router, republisher, forwarder mapping and core admission, and leaves every other peering as it was. New in goatbuilder 0.5.1 and not yet run on real hosts: survey first, and read what it lists.</p>
+  {{if .Running}}<p><span class="badge info">Running…</span></p>{{end}}
+  {{with .Last}}<p class="hint">Last: {{.}}{{with $.Backout.Note}} · {{.}}{{end}} · <a href="/log?n={{$them}}&amp;phase=backout" target="_blank" rel="noopener">Log</a></p>{{end}}
+  <form method="post" action="/backout" class="runform">
+    <input type="hidden" name="n" value="{{$them}}"><input type="hidden" name="dry" value="1">
+    <button class="btn" type="submit"{{if .Busy}} disabled{{end}}>Survey (dry run)</button>
+  </form>
+  <form method="post" action="/backout" class="danger-form runform" data-confirm="Back out {{$them}}? This removes it from our edge and core and cuts the link now.">
+    <input type="hidden" name="n" value="{{$them}}">
+    <label>Type <code>{{$them}}</code> to back it out.<input name="confirm" autocomplete="off" spellcheck="false"></label>
+    <button class="btn danger-btn" type="submit"{{if .Busy}} disabled{{end}}>Back out</button>
+  </form>
+</details>
+{{end}}
 <details class="danger">
   <summary>Delete this peering's record</summary>
   <form method="post" action="/delete" class="danger-form">
@@ -203,6 +223,7 @@
   <form class="card new-form" method="post" action="/peerings">
     <label>Their code<input name="them" required pattern="[a-z0-9][a-z0-9\-]{1,15}" placeholder="can" autocomplete="off" spellcheck="false"><small>Usually the ISO alpha-3 country code, lower case (can, usa). Codes that aren\'t countries (uk1) show their code instead of a flag.</small></label>
     <label>Name<input name="name" placeholder="Canada" maxlength="80"></label>
+    <label>Method<select name="method"><option value="goatbuilder" selected>goatbuilder federate (0.5.1)</option><option value="legacy">Earlier scripts (goat federate, until 2026-12-11)</option></select><small>New peerings use goatbuilder. The earlier scripts are for finishing one already under way.</small></label>
     <label>Who listens?<select name="listen"><option value="us">We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them">They do (we dial them)</option></select><small>One side accepts inbound UDP. A partner with a public address listens; if both are behind NAT, we listen through our forwarder.</small></label>
     <div class="form-actions"><button class="btn primary" type="submit">Engage</button></div>
   </form>

@@ -240,3 +240,36 @@ keep_old() {
 our_ca_cert() { echo "$TREE/ops/enrollment/ca/$FED_SITE/root-cert.pem"; }
 
 groups4() { echo "$1" | sed -E 's/(.{4})/\1 /g; s/ $//'; }
+
+# ---- goatbuilder federate (goatbuilder 0.5.1 and later) -------------------
+# Its own work directory per peering, kept across runs so a stopped run resumes.
+GBW=$FED_STATE/gb/$THEM
+# gb: goatbuilder federate in the assembled tree, with our keys and CA passed as
+# overrides (the declarations in goatbuilder.yaml name the operator laptop's).
+gb() {
+	mkdir -p "$GBW"
+	(cd "$TREE" && FED_WORK="$GBW" FED_WORK_ROOT="$FED_STATE/gb" \
+		FED_SIGNING_KEY="$SEED" FED_CA_KEY="$CA_KEY" FED_CA_CERT="$(our_ca_cert)" \
+		FED_DIRECTORY_URL="$FED_DIRECTORY_URL" GOAT_PROFILE_DIR="$HOME/.goat" \
+		goatbuilder federate "$@" -C "$TREE" --color never)
+}
+# The tree the plan was made from: deploy and test must use the same one, or
+# the plan's inputs have moved and the approval no longer applies.
+use_plan_tree() {
+	TREE=$(cat "$W/tree" 2>/dev/null) && [ -d "$TREE" ] || die "Make the plan first."
+}
+# Bring files goatbuilder wrote in the tree back into the config, so they're
+# committed there and kept: it renders, it never commits.
+tree_to_config() {
+	local f n=0
+	while IFS= read -r f; do
+		[ -n "$f" ] || continue
+		mkdir -p "$CFG/$(dirname "$f")"
+		cp -f "$TREE/$f" "$CFG/$f"
+		echo "  $f"
+		n=$((n + 1))
+	done < <(git -C "$TREE" status --porcelain --untracked-files=all -- ops | sed -E 's/^.. //; s/^.* -> //')
+	echo "$n file(s) from goatbuilder"
+}
+# The value after a marker in goatbuilder's output, e.g. "sha256:…".
+gb_value() { grep -oE "$1[^ ,;\"]+" | head -1 | sed -E "s/^$1//"; }

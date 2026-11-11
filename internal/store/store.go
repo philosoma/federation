@@ -39,6 +39,10 @@ type Peering struct {
 	Them     string          `json:"them"`
 	Name     string          `json:"name"`
 	WeListen bool            `json:"we_listen"`
+	// Method is how the phases are driven: "goatbuilder" (goatbuilder federate,
+	// 0.5.1 and later) or "" for the earlier scripts (goat federate), which
+	// the peerings set up before it keep.
+	Method string `json:"method,omitempty"`
 	Created  time.Time       `json:"created"`
 	Runs     map[string]*Run `json:"runs,omitempty"`
 }
@@ -121,7 +125,10 @@ var sovereign = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,15}$`)
 func ValidSovereign(id string) bool { return sovereign.MatchString(id) }
 
 // Create adds a peering.
-func (s *Store) Create(them, name string, weListen bool) error {
+// MethodGoatbuilder drives a peering with `goatbuilder federate`.
+const MethodGoatbuilder = "goatbuilder"
+
+func (s *Store) Create(them, name string, weListen bool, method string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !ValidSovereign(them) {
@@ -130,7 +137,7 @@ func (s *Store) Create(them, name string, weListen bool) error {
 	if s.find(them) != nil {
 		return fmt.Errorf("there is already a peering with %s", them)
 	}
-	s.data.Peerings = append(s.data.Peerings, &Peering{Them: them, Name: name, WeListen: weListen, Created: time.Now().UTC()})
+	s.data.Peerings = append(s.data.Peerings, &Peering{Them: them, Name: name, WeListen: weListen, Method: method, Created: time.Now().UTC()})
 	if err := s.save(); err != nil {
 		s.data.Peerings = s.data.Peerings[:len(s.data.Peerings)-1]
 		return err

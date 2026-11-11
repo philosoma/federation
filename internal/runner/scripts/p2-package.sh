@@ -37,7 +37,7 @@ ssh_edge "sudo -n wg show $IFACE | head -5" || die "$IFACE isn't up on the edge.
 step "goatbuilder federate init --over-ssh (measure and sign our package)"
 keep_old ours.canonical.json
 cd "$TREE"
-goatbuilder federate init --over-ssh "$THEM" -C "$TREE" --with-transport --with-data \
+goatbuilder-legacy federate init --over-ssh "$THEM" -C "$TREE" --with-transport --with-data \
 	--signing-key "$SEED" --out "$W/ours.canonical.json" || die "init couldn't measure or sign our package."
 step "goat federate lint"
 goat federate lint "$W/ours.canonical.json" || die "Lint refused our package."

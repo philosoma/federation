@@ -76,8 +76,49 @@ func (r *Runner) Release() (ReleasePlan, bool) {
 func (r *Runner) LastSend(them string) (SendResult, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	res, ok := r.sends[them]
+	res, ok := r.sends[SendPhase+"/"+them]
 	return res, ok
+}
+
+// BackoutPhase is the log name and busy marker of a goatbuilder backout.
+const BackoutPhase = "backout"
+
+// LastBackout is how the last backout (or its dry run) for a partner went.
+func (r *Runner) LastBackout(them string) (SendResult, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	res, ok := r.sends[BackoutPhase+"/"+them]
+	return res, ok
+}
+
+// StartBackout backs one goatbuilder peering out, or with dry only surveys
+// what that would remove. In the background, waiting its turn like a phase.
+func (r *Runner) StartBackout(them, name string, dry bool, by string) error {
+	p, ok := r.st.Get(them)
+	if !ok || p.Method != store.MethodGoatbuilder {
+		return errors.New("backout is for peerings run by goatbuilder federate")
+	}
+	if err := r.claim(them, BackoutPhase); err != nil {
+		return err
+	}
+	d := "0"
+	if dry {
+		d = "1"
+	}
+	go r.runAction(them, name, BackoutPhase, "gb-backout.sh", []string{"FED_BACKOUT_DRY=" + d}, by)
+	return nil
+}
+
+// claim takes the one-at-a-time slot for an action.
+func (r *Runner) claim(them, kind string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.current != "" {
+		return fmt.Errorf("something else is running (%s). Wait for it to finish.", r.current)
+	}
+	r.current = them + "/" + kind
+	r.progress = Progress{Started: time.Now()}
+	return nil
 }
 
 // StartSend sets which topics a partner gets: commits the release file and
@@ -102,20 +143,16 @@ func (r *Runner) StartSend(them, name string, topics []string, by string) error 
 			return fmt.Errorf("unknown topic %q", t)
 		}
 	}
-	r.mu.Lock()
-	if r.current != "" {
-		busy := r.current
-		r.mu.Unlock()
-		return fmt.Errorf("something else is running (%s). Wait for it to finish.", busy)
+	if err := r.claim(them, SendPhase); err != nil {
+		return err
 	}
-	r.current = them + "/" + SendPhase
-	r.progress = Progress{Started: time.Now()}
-	r.mu.Unlock()
-	go r.runSend(them, name, topics, by)
+	go r.runAction(them, name, SendPhase, "send.sh", []string{"FED_SEND=" + strings.Join(topics, " ")}, by)
 	return nil
 }
 
-func (r *Runner) runSend(them, name string, topics []string, by string) {
+// runAction runs one script that isn't a phase (a release change, a backout)
+// and keeps how it went.
+func (r *Runner) runAction(them, name, kind, script string, extra []string, by string) {
 	res := SendResult{Status: store.StatusFailed, By: by}
 	defer func() {
 		res.At = time.Now().UTC()
@@ -123,9 +160,9 @@ func (r *Runner) runSend(them, name string, topics []string, by string) {
 		if r.sends == nil {
 			r.sends = map[string]SendResult{}
 		}
-		r.sends[them] = res
+		r.sends[kind+"/"+them] = res
 		r.mu.Unlock()
-		r.log.Info("release changed", "them", them, "topics", topics, "status", res.Status, "by", by)
+		r.log.Info("action finished", "kind", kind, "them", them, "env", extra, "status", res.Status, "by", by)
 		// Refresh the status clone before the page stops showing "Applying",
 		// or it redraws the old choice from the stale clone.
 		r.measure(context.Background())
@@ -133,7 +170,7 @@ func (r *Runner) runSend(them, name string, topics []string, by string) {
 	}()
 
 	work := filepath.Join(r.root, "work", them)
-	logPath := r.LogPath(them, SendPhase)
+	logPath := r.LogPath(them, kind)
 	if err := errors.Join(os.MkdirAll(filepath.Dir(logPath), 0o700), os.MkdirAll(work, 0o700)); err != nil {
 		res.Note = err.Error()
 		return
@@ -144,16 +181,16 @@ func (r *Runner) runSend(them, name string, topics []string, by string) {
 		return
 	}
 	defer logf.Close()
-	fmt.Fprintf(logf, "== What we send %s: %s\n== %s, by %s\n\n", them, strings.Join(topics, ", "), time.Now().UTC().Format(time.RFC3339), orDash(by))
+	fmt.Fprintf(logf, "== %s %s %v\n== %s, by %s\n\n", kind, them, extra, time.Now().UTC().Format(time.RFC3339), orDash(by))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", filepath.Join(r.root, "scripts", "send.sh"))
+	cmd := exec.CommandContext(ctx, "bash", filepath.Join(r.root, "scripts", script))
 	cmd.Dir = work
 	cmd.Env = append(append([]string{}, r.env...),
 		"FED_US="+r.us, "FED_THEM="+them, "FED_NAME="+name, "FED_WORK="+work,
-		"FED_STATE="+r.root, "FED_SCRIPTS="+filepath.Join(r.root, "scripts"),
-		"FED_SEND="+strings.Join(topics, " "))
+		"FED_STATE="+r.root, "FED_SCRIPTS="+filepath.Join(r.root, "scripts"))
+	cmd.Env = append(cmd.Env, extra...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	pr, pw := io.Pipe()
@@ -186,4 +223,57 @@ func (r *Runner) runSend(them, name string, topics []string, by string) {
 	}
 	fmt.Fprintf(logf, "\n== done\n")
 	res.Status, res.Note = store.StatusPassed, ""
+}
+
+// GBStatus is what `goatbuilder federate status` recorded for one peering, as
+// the status check last wrote it: its next step and last acceptance verdict.
+type GBStatus struct {
+	Next       string
+	Acceptance string
+	LastRun    string
+}
+
+// GoatbuilderStatus reads it; ok is false when goatbuilder knows nothing of them.
+func (r *Runner) GoatbuilderStatus(them string) (GBStatus, bool) {
+	b, err := os.ReadFile(filepath.Join(r.root, "gb-status.json"))
+	if err != nil {
+		return GBStatus{}, false
+	}
+	var raw struct {
+		Peerings []struct {
+			Peering string `json:"peering"`
+			Next    any    `json:"next"`
+			LastRun *struct {
+				Stage   string `json:"stage"`
+				Outcome string `json:"outcome"`
+			} `json:"last_run"`
+			Acceptance *struct {
+				Verdict   string `json:"verdict"`
+				Agreement string `json:"agreement"`
+			} `json:"acceptance"`
+		} `json:"peerings"`
+	}
+	if json.Unmarshal(b, &raw) != nil {
+		return GBStatus{}, false
+	}
+	for _, p := range raw.Peerings {
+		if p.Peering != them {
+			continue
+		}
+		var s GBStatus
+		if p.Next != nil {
+			s.Next = fmt.Sprint(p.Next)
+		}
+		if p.LastRun != nil {
+			s.LastRun = strings.TrimSpace(p.LastRun.Stage + " " + p.LastRun.Outcome)
+		}
+		if p.Acceptance != nil && p.Acceptance.Verdict != "" {
+			s.Acceptance = p.Acceptance.Verdict
+			if p.Acceptance.Agreement == "stale" {
+				s.Acceptance += " (stale: a different agreement)"
+			}
+		}
+		return s, true
+	}
+	return GBStatus{}, false
 }
