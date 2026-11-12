@@ -171,6 +171,7 @@ gb() {
 	(cd "$TREE" && FED_WORK="$GBW" FED_WORK_ROOT="$FED_STATE/gb" \
 		FED_SIGNING_KEY="$SEED" FED_CA_KEY="$CA_KEY" FED_CA_CERT="$(our_ca_cert)" \
 		FED_DIRECTORY_URL="$FED_DIRECTORY_URL" GOAT_PROFILE_DIR="$HOME/.goat" \
+		FED_ROUTER_DOCKER_HOST="${FED_ROUTER_DOCKER_HOST:-ssh://$CORE}" \
 		goatbuilder federate "$@" -C "$TREE" --color never)
 }
 # The tree the plan was made from: deploy and test must use the same one, or

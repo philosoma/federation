@@ -223,6 +223,11 @@
     - {path: "{{ federation_state_dir }}", owner: "{{ federation_uid }}", mode: "0700"}
     - {path: "{{ federation_compose_dir }}", owner: root, mode: "0755"}
 
+- name: federation | the docker socket's group
+  ansible.builtin.stat:
+    path: "{{ federation_docker_socket }}"
+  register: federation_docker_socket_stat
+
 - name: federation | render docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2

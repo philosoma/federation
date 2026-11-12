@@ -21,8 +21,15 @@ services:
       - "{{ federation_compose_dir }}/config.json:/etc/federation/config.json:ro"
       - "{{ federation_app_secrets_dir }}:/run/secrets/federation:ro"
       - "{{ federation_state_dir }}:/var/lib/federation"
+      # goatbuilder reads the core router through docker (preflight, phase 3). The
+      # app runs on the core, so it uses the local daemon.
+      - "{{ federation_docker_socket }}:/var/run/docker.sock"
+    group_add:
+      - "{{ federation_docker_gid }}"
     environment:
       FED_SITE: "{{ site_id }}"
+      FED_ROUTER_DOCKER_HOST: "unix:///var/run/docker.sock"
+      FED_ROUTER_CONTAINER: "{{ federation_router_container }}"
       FED_CONFIG_REPO: "{{ federation_config_repo }}"
       FED_CONTACT: "{{ federation_contact }}"
       FED_EDGE_NAME: "{{ federation_edge_name }}"

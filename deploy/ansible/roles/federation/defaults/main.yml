@@ -63,3 +63,9 @@ federation_traefik_network: mgmt
 federation_traefik_dynamic_dir: /etc/traefik/dynamic
 federation_traefik_router_name: federation
 federation_core_address: "{{ mesh_ip_a | mandatory }}"
+
+# The core's docker daemon, for goatbuilder to read the core router. The
+# container's user gets the socket's group as a supplementary group.
+federation_docker_socket: /var/run/docker.sock
+federation_docker_gid: "{{ federation_docker_socket_stat.stat.gid | default(0) }}"
+federation_router_container: "{{ site_id }}-zenoh-router"
