@@ -45,6 +45,14 @@
         mode: "0440"
         validate: /usr/sbin/visudo -cf %s
 
+    # goatbuilder's acceptance reads the edge router's log with the docker client
+    # over ssh, which can't use sudo. Nothing new for a login with the rule above.
+    - name: federation | the edge login can reach docker without sudo, for goatbuilder
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: [docker]
+        append: true
+
     - name: federation | sudoers files from a manual setup, replaced by the rule above
       ansible.builtin.file:
         path: "/etc/sudoers.d/{{ item }}"

@@ -198,6 +198,15 @@
     state: present
     exclusive: false
 
+# goatbuilder federate reads the core router over ssh://<login>@<core> with the
+# docker client, which can't use sudo. The login already has passwordless sudo,
+# so the docker group grants it nothing new.
+- name: federation | the core login can reach docker without sudo, for goatbuilder
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: [docker]
+    append: true
+
 - name: federation | the GitHub deploy key to add (write) to the config repo
   ansible.builtin.debug:
     msg: "{{ federation_github_public_key }}"
