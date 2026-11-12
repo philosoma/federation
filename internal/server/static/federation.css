@@ -543,3 +543,4 @@ table.acc td:last-child { color: var(--fog-2); overflow-wrap: anywhere; }
 .legacy-card h2, .done-card h2 { margin: 0 0 .4em; font-size: 1.15em; }
 .done-card { border-left: 4px solid var(--green-mid); }
 @media (max-width: 560px) { .step { grid-template-columns: 26px minmax(0, 1fr); gap: 8px; } .step-dot { width: 24px; height: 24px; font-size: .8em; } .checks li { grid-template-columns: 1.4em 1fr; } .c-detail { grid-column: 2; } }
+.before { padding: 14px 18px; margin: 0 0 1.2em; } .before h2 { margin: 0 0 .5em; font-size: 1.05em; } .before li { margin: .25em 0; }

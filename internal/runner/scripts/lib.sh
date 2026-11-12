@@ -167,6 +167,7 @@ GBW=$FED_STATE/gb/$THEM
 # overrides (the declarations in goatbuilder.yaml name the operator laptop's).
 gb() {
 	mkdir -p "$GBW"
+	seed_carrier_keys
 	(cd "$TREE" && FED_WORK="$GBW" FED_WORK_ROOT="$FED_STATE/gb" \
 		FED_SIGNING_KEY="$SEED" FED_CA_KEY="$CA_KEY" FED_CA_CERT="$(our_ca_cert)" \
 		FED_DIRECTORY_URL="$FED_DIRECTORY_URL" GOAT_PROFILE_DIR="$HOME/.goat" \
@@ -177,18 +178,48 @@ gb() {
 use_plan_tree() {
 	TREE=$(cat "$W/tree" 2>/dev/null) && [ -d "$TREE" ] || die "Make the plan first."
 }
-# Bring files goatbuilder wrote in the tree back into the config, so they're
-# committed there and kept: it renders, it never commits.
+# Bring the files goatbuilder wrote in the tree back into the config, so they're
+# committed there: it renders, it never commits. Named paths only: the tree
+# also holds goatcore and goatstuff files that are not ours to commit.
 tree_to_config() {
 	local f n=0
-	while IFS= read -r f; do
-		[ -n "$f" ] || continue
+	for f in ops/goatbuilder/peering-values.yaml \
+		ops/ansible/group_vars/"${THEM}"_edge/peering-values.yml ops/ansible/group_vars/"${THEM}"_core/peering-values.yml \
+		ops/ansible/group_vars/"${THEM}"_edge/peering-deployment.yml ops/ansible/group_vars/"${THEM}"_core/peering-deployment.yml \
+		ops/ansible/group_vars/peering_forwarders/peering-forwarder.yml \
+		"ops/federation/$FED_GB_ENVIRONMENT/peerings/$THEM/federation.toml" \
+		"ops/ansible/group_vars/${FED_SITE//-/_}_hosts/peerings.yml"; do
+		[ -f "$TREE/$f" ] || continue
+		cmp -s "$TREE/$f" "$CFG/$f" 2>/dev/null && continue
 		mkdir -p "$CFG/$(dirname "$f")"
 		cp -f "$TREE/$f" "$CFG/$f"
 		echo "  $f"
 		n=$((n + 1))
-	done < <(git -C "$TREE" status --porcelain --untracked-files=all -- ops | sed -E 's/^.. //; s/^.* -> //')
+	done
 	echo "$n file(s) from goatbuilder"
+}
+# The forwarder's list of relayed peerings reads each carrier's public keys
+# from files on this machine (<work>/pki). A missing file drops that peering
+# from the list, so put every recorded key in place before goatbuilder runs.
+seed_carrier_keys() {
+	local d=$CFG/ops/federation/$FED_GB_ENVIRONMENT/carrier-keys f p k
+	[ -d "$d" ] || return 0
+	for f in "$d"/*.pub; do
+		[ -f "$f" ] || continue
+		p=$(basename "$f"); k=${p#*.}; p=${p%%.*}
+		mkdir -p "$FED_STATE/gb/$p/pki"
+		cmp -s "$f" "$FED_STATE/gb/$p/pki/$k" || cp -f "$f" "$FED_STATE/gb/$p/pki/$k"
+	done
+}
+# Keep this peering's carrier public keys in the config once phase 2 has made
+# them, so they survive this machine.
+save_carrier_keys() {
+	local d=$CFG/ops/federation/$FED_GB_ENVIRONMENT/carrier-keys k
+	for k in edge-carrier.pub forwarder-carrier.pub; do
+		[ -s "$GBW/pki/$k" ] || continue
+		mkdir -p "$d"
+		cmp -s "$GBW/pki/$k" "$d/$THEM.$k" 2>/dev/null || cp -f "$GBW/pki/$k" "$d/$THEM.$k"
+	done
 }
 # The value after a marker in goatbuilder's output, e.g. "sha256:…".
 gb_value() { grep -oE "$1[^ ,;\"]+" | head -1 | sed -E "s/^$1//"; }

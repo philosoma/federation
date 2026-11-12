@@ -1,62 +1,99 @@
 # Federation
 
-> **Early and rough.** This is the tool one goatnet (EFDI UK) built to federate
-> with partner nations. It has completed two live peerings, but it was written for one
-> site and has only been tested there. Expect to read the scripts before you trust them,
-> and expect sharp edges. Issues and fixes are welcome.
+> **Early and rough.** One goatnet (EFDI UK) built this to federate with partner
+> nations. It was rebuilt on 2026-11-12 around `goatbuilder federate`
+> (goatbuilder 0.5.1), and that path has not yet completed a peering between two
+> standing environments. Read the scripts before you trust them. Issues and
+> fixes are welcome.
 
-Federation is a small web app that runs on your goatnet core host. It takes an
-operator through the goatcore cross-sovereign federation process (ADR 1157)
-with a partner nation, one phase at a time. There is one page, with a **Run**
-button per phase. Each phase runs the goat, goatbuilder and Ansible steps
-behind the scenes and shows its log in an expandable section. Waits for the
-partner are shown as waits, not failures. A **Status** page shows every partner
-and whether its link is up, and links to their data in Flashlight.
+Federation is a small web app that runs on your goatnet core host. It walks an
+operator through federating with another nation, following goatcore's operator
+guide, *Federate two sovereign environments with goatbuilder*. You decide who
+the partner is and what they get, confirm the keys with them on a call, and
+approve what your core admits. `goatbuilder federate` does, checks and records
+the rest; the app runs it for you and shows what it needs from you.
 
-## The phases
+## What you see
 
-| Row | Phases | What it does | Both sides at once? |
+**Setup** is one guided list per partner. Finished steps collapse to a line,
+the current step is open with its one button, and later steps wait.
+
+| Step | goatbuilder | What happens | With the partner? |
 |---|---|---|---|
-| 1 | 1 | Preflight; allocate this link's slot (interface, ports, link subnet) and declare it in the config | |
-| 2 | 2–4 | Prepare the edge, build and lint our package, publish it to the directory | |
-| 5 | 5 | Exchange: fetch theirs, read both fingerprints to each other, tick ours and theirs | yes (a call) |
-| 6 | 6–9 | Compose and verify the agreement, mint the peering certificates, render the applied files | |
-| 10 | 10 | Admit the peering on our core router (asks first: it restarts the router) | |
-| 11 | 11 | Bring up the WireGuard tunnel (direct, or through the peering forwarder) | yes |
-| 12 | 12 | Edge router and republisher (asks first); waits for their edge to connect | yes |
-| 13 | 13 | SPIRE trust-domain federation: **not done**, optional | |
-| 14 | 14 | Acceptance round trip; waits for them to confirm theirs | yes |
+| Check we're ready | (before) | Keys, config and push access, what we offer, the directory, the edge, the core router, the forwarder. Changes nothing. | |
+| Reserve the link | `allocate` | Declares the peering and lets goatbuilder choose its interface, ports and addresses. Commits them. Shows the address they dial, if we listen. | |
+| Exchange packages and read the keys | phases 1–5 | Measures and signs our package, swaps packages through the directory. Shows our codes to read aloud and their CA fingerprint to check; you type their key. | on a call |
+| Agree | phase 6 | Composes the agreement against the confirmed keys. Shows the digest to read aloud. | on a call |
+| Review the plan | phases 7–9, `plan` | Mints certificates, renders everything, writes the bounded plan and what the core will admit. Changes no host. You approve both. | |
+| Deploy | phases 10–13 | Admits the edge on the core (the router restarts), opens the tunnel, starts the edge router and republisher. | same time |
+| Prove it | phase 14 | Acceptance from our side, each check listed. Counts only on PASS. | same time |
 
-Each phase commits its changes to your config overlay and pushes them to main.
-It then deploys from a freshly assembled tree, so the repository stays the
-record.
+A step that fails shows the one-line reason, what `goatbuilder explain` says
+about its error code, the log, and a **Try again** button: goatbuilder resumes
+where it stopped. A step that is waiting on the partner says so.
+
+**Status** shows every partner the core admits: tunnel, traffic, edge router,
+republisher, agreement end date, links to their data, and **What we send**.
+
+## Choosing what each partner gets
+
+Each partner's card on Status has a **What we send** box with one checkbox per
+topic. Saving is a release decision: the app commits it to the release file in
+your config overlay (`ops/release-bridge/release-bridge.json`, or
+`FED_RELEASE_FILE`) and restarts the release bridge on the core. Nothing
+restarts on the router and no other partner is touched.
+
+```json
+{
+  "rest": "http://127.0.0.1:8000",
+  "set": "REL-ALL",
+  "topics": [
+    {"id": "turret", "name": "Sentry turret", "src": ["<slot>/turret/cots"]},
+    {"id": "sattrack", "name": "Sat tracker", "src": ["<slot>/sattrack/cots"]}
+  ],
+  "send": {"can": ["turret", "sattrack"], "est": ["turret"]}
+}
+```
+
+The bridge copies each sample to `release/<set>/<partner>/<key without its slot
+id>`. Each partner's read on the core is its own prefix
+(`from/<us>/<set>/<partner>/**`) plus the acceptance keys, so it gets only what
+is ticked for it. goatbuilder's admission writes only the partner's name and CN
+on the core; the app writes these reads before the plan.
 
 ## What you need
 
-- A goatnet core built from goatcore, with a config overlay repository (the
-  `assemble.sh` layout) and a peering edge host in `inventory/peering-edges.ini`.
-- **goatcore with `goat init --over-ssh` and the SPIRE trust-domain fix.** At the
-  time of writing these are on goatcore branch `integration/federation-turnkey`,
-  not `main`. The image builds goat and goatbuilder from a `git archive` of that
-  source, saved as `goatcore-src.tar.gz` next to the Dockerfile. It is not in
-  this repository.
-- oauth2-proxy and Hydra on the core, as Signpost uses (the role adds its own
-  login door). The app refuses requests without an allowed group, and listens
-  only on loopback if no groups are set.
+- A goatnet built from goatcore at or after tag `goatbuilder/v0.5.1`, with a
+  config overlay (the `assemble.sh` layout) the app can push to.
+- A peering edge host on your mesh, reachable by SSH from the core.
+- oauth2-proxy and Hydra on the core, as Signpost uses. The app refuses
+  requests without an allowed group, and listens only on loopback if none is set.
 - Your federation signing seed, your site CA key and the goat operator profile
   on the machine you deploy from. The role **copies the CA key onto the core**
-  so phases can mint certificates unattended. Decide whether your key policy
+  so certificates can be minted unattended. Decide whether your key policy
   allows that.
-- If your edge is behind NAT and you listen: the AWS peering forwarder (ADR 1218)
-  and a limited IAM user for it, given as `FEDERATION_AWS_ACCESS_KEY_ID` and
-  `FEDERATION_AWS_SECRET_ACCESS_KEY` in the deploy environment.
-- From the core to the edge: SSH reachability over your mesh. The play adds
-  the app's key and a passwordless sudo rule for the edge login.
+- If partners can't accept inbound traffic and neither can your edge: a peering
+  forwarder (ADR 1218), its group in `inventory/peering-edges.ini` (goatbuilder
+  passes only that inventory), and a limited IAM user for it
+  (`FEDERATION_AWS_ACCESS_KEY_ID` / `FEDERATION_AWS_SECRET_ACCESS_KEY` at deploy).
+
+In the config overlay:
+
+- `ops/federation/<environment>/federation.toml`: what you offer
+  (`sovereign_id`, `term_days`, `cut_contact`, `[data] release`,
+  `[transport] measured_mtu`).
+- `ops/goatbuilder/goatbuilder.yaml`: `environments[].peering_directory.url`.
+  The app adds each `peerings:` entry itself.
+- `group_vars/<site>_hosts/federation-site.yml`: `goat_zenoh_edge_image`,
+  `goat_zenoh_edge_core_cn`, `goat_fed_republisher_image`,
+  `goat_fed_republisher_core_endpoint`, `peering_spire_server_addr`.
+- `group_vars/<site>_hosts/peerings.yml` for `zenoh_sovereign_peerings`:
+  goatbuilder's admission refuses any other file (GB-237).
 
 ## Settings
 
-Set these in `group_vars/<site>_hosts/federation.yml` of your config overlay.
-The role refuses to run without the required ones.
+Set these in `group_vars/<site>_hosts/federation.yml`. The role refuses to run
+without the required ones.
 
 | Setting | Required | Example |
 |---|---|---|
@@ -65,30 +102,26 @@ The role refuses to run without the required ones.
 | `federation_edge_host` | yes | `100.64.0.20` (mesh address) |
 | `federation_edge_user` | yes | `ops` |
 | `federation_config_repo` | yes | `git@github.com:you/your-goatnet-config.git` |
-| `federation_contact` | yes | `federation@example.org` (goes in your package) |
+| `federation_contact` | yes | `federation@example.org` |
 | `federation_public_name` | if you listen | `fed.example.org` (the forwarder's name) |
-| `federation_site_name`, `federation_site_flag` | | `Example`, `gb` (ISO alpha-2) |
-| `federation_fips_waiver` | | the waiver text phase 2 records |
+| `federation_site_name`, `federation_site_flag` | | `Example`, `gb` |
+| `federation_fips_waiver` | | the waiver text written into each edge half |
 | `federation_core_name/host/user` | | default: `inventory_hostname`, `mesh_ip_a`, `ansible_user` |
 | `federation_allowed_groups` | | `PLATFORM-ADMIN` |
 | `federation_image` | yes | `ghcr.io/<owner>/federation@sha256:…` |
-
-The role passes them into the container as `FED_*` variables. The phase
-scripts stop with the variable's name if one is missing. See
-`deploy/ansible/roles/federation/defaults/main.yml` for the rest.
 
 ## Build and deploy
 
 ```sh
 go test ./...
-# on the core (the image is built for its architecture):
-cp /path/to/goatcore-src.tar.gz .
 docker build --build-arg VERSION=$(git rev-parse --short HEAD) -t federation:dev .
-# push it to your registry, then pin the digest in federation_image
 ```
 
-Copy `deploy/ansible/federation.yml` and `deploy/ansible/roles/federation` into
-your overlay's `ops/ansible`. Then run from an assembled tree:
+The image downloads the released goatbuilder and checks it against the pinned
+digest (arm64 and amd64). Push it to your registry and pin its digest in
+`federation_image`. Copy `deploy/ansible/federation.yml` and
+`deploy/ansible/roles/federation` into your overlay's `ops/ansible`, then from
+an assembled tree:
 
 ```sh
 ansible-playbook -i inventory/mgmt-hosts.ini -i inventory/peering-edges.ini \
@@ -96,72 +129,48 @@ ansible-playbook -i inventory/mgmt-hosts.ini -i inventory/peering-edges.ini \
 ```
 
 The play prints a GitHub deploy key. Add it to your config overlay with write
-access, or phase 1 can't push.
-
-For local development, `go run ./cmd/federation` serves the page on
-`127.0.0.1:8090` with the state in `./data`. Phases need the core's environment,
-so they won't get far locally.
+access. `go run ./cmd/federation` serves the page on `127.0.0.1:8090` for
+development; the steps need the core's environment.
 
 ## How it works
 
-- `cmd/federation`: the server. The config is `examples/config.example.json`.
-- `internal/runner/phases.go` lists the phases. `internal/runner/scripts/` holds
-  one bash script per row, plus `lib.sh` and `fedcfg.py`, which edits the config
-  overlay. Scripts talk to the page through stdout lines: `::show k=v`,
-  `::note`, `::progress N/M label`. Exit 75 means "waiting for the partner".
-- Only one phase runs at a time. The state, logs and work files live under
-  `/var/lib/federation`, and each peering's slot is in `work/<them>/alloc.env`.
-- Slot N gives you `wg-fedN`, edge port `51830+N`, public port `51820+2N` on
-  the forwarder, link subnet `169.254.(20+N).0/31` (unless the partner's wins)
-  and republisher metrics port `9310+N`. Every edge router listens on 7448.
-
-## Choosing what each partner gets
-
-Each partner's card on the Status page has a **What we send** box, with one
-checkbox per topic. Ticking a box and saving is a release decision. The app
-commits the change to the release file in your config overlay
-(`ops/release-bridge/release-bridge.json`, or `FED_RELEASE_FILE`), then
-reinstalls and restarts the release bridge on the core. The core router doesn't
-restart and other partners aren't touched.
-
-The release file lists the topics. A topic is a group of internal key
-prefixes released together, and you edit the list in git:
-
-```json
-{
-  "rest": "http://127.0.0.1:8000",
-  "set": "REL-ALL",
-  "topics": [
-    {"id": "turret", "name": "Sentry turret", "detail": "detections, location, armed state, CoT",
-     "src": ["<slot>/turret/sensor/detection", "<slot>/turret/cots"]},
-    {"id": "sattrack", "name": "Sat tracker", "src": ["<slot>/sattrack/cots"]}
-  ],
-  "send": {"can": ["turret", "sattrack"], "est": ["turret"]}
-}
-```
-
-The bridge (`internal/runner/scripts/release-bridge.py`) copies each sample to
-`release/<set>/<partner>/<key without its slot id>`. Each partner's read on our
-core is narrowed to its own prefix, so it gets only what is ticked for it.
-Phase 10 writes these reads:
-`from/<us>/<set>/<partner>/**`, plus the acceptance check's shared
-`acceptance/**` and `fedcheck-ack/**` keys. Partners see our data as, for
-example, `from/gbr/REL-ALL/can/turret/cots/v1`.
+- `internal/runner/phases.go` lists the steps; `internal/runner/scripts/gb-*.sh`
+  is one script per step. Scripts talk to the page through stdout lines:
+  `::show key=value`, `::note`, `::progress N/M label`. Exit 75 means "waiting
+  on the partner".
+- Each step assembles a deploy tree from config main and runs
+  `goatbuilder federate … -C <tree>`, with the signing key, CA and directory
+  passed as `FED_*` overrides. Deploy and acceptance reuse the tree the plan
+  was made from, or the plan's approval no longer applies.
+- goatbuilder renders files and never commits; the app copies the named files
+  back into the overlay and pushes them, so the repository stays the record.
+- goatbuilder's work directory for a peering is `<state>/gb/<partner>`: its
+  journal, both packages, the agreement, `plan.json`, the acceptance evidence.
+- Peerings are declared `deployment: hand`: goatbuilder's rendered half turns
+  SPIRE federation on. The app writes the small hand half
+  (`group_vars/<partner>_{edge,core}/vars.yml`) and goatbuilder renders the
+  allocated values beside it (`peering-values.yml`).
+- When you listen through a forwarder, the forwarder's list reads each
+  carrier's public keys from files in the work directory. The app keeps them in
+  the overlay (`ops/federation/<environment>/carrier-keys/`) and puts them in
+  place before every run: a missing file would drop that peering from the list.
+- One step runs at a time for the whole node.
 
 ## Known gaps
 
-- Written against one site's layout: inventory names, group_vars paths and the
-  forwarder path all follow EFDI UK's overlay. Other layouts will need changes
-  in `fedcfg.py` and `lib.sh`.
-- Phase 13 (SPIRE federation) is not implemented.
-- There is no "remove peering" button. Removing a peering means editing the config, the
-  forwarder and the edge by hand.
-- The directory holds one package per sovereign, and the app doesn't warn when
-  another peering's exchange is still open.
-- Agreements expire (91 days by default). Renewal is a new exchange, and the app
-  doesn't remind you.
-- No CI or published image yet, because the goatcore source it needs isn't on
-  goatcore `main`.
+- The goatbuilder path is new here: expect fixes after the first real peerings.
+- SPIRE federation (phase 13) is left off and reports NOT DONE, so acceptance
+  ends INCOMPLETE rather than PASS; so do the identity and refusal checks,
+  which need a probe launcher goatcore doesn't ship yet.
+- The shared acceptance session (both halves combined, then "exchanging"
+  published) is not driven from the page. Its commands are in goatcore's
+  `federation-acceptance.md`, section 6.
+- Renewing a running peering in place is untested upstream. New certificates
+  need `mint-peering-leaves.sh --rotate`, which the page does not run.
+- Backout is offered (survey first), but goatbuilder has not run it on real
+  hosts.
+- The directory holds one package per party: one exchange at a time.
+- Written against one site's overlay layout.
 
 ## Licence
 

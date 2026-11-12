@@ -8,6 +8,9 @@ sync_repos
 assemble
 step "goatbuilder federate $THEM: phases 1 to 5"
 rc=0; gb_run "$THEM" --yes --confirm || rc=$?
+# Phase 2 may have made this peering's carrier keys: keep them in the config.
+save_carrier_keys
+git -C "$CFG" add -A && git -C "$CFG" diff --cached --quiet || push_config "Carrier public keys for the $THEM peering"
 if echo "$GB_OUT" | grep -q "GB-192"; then
 	our_key=$(echo "$GB_OUT" | grep -oE "our verifying key [A-Za-z0-9+/=]+" | head -1 | awk '{print $4}')
 	our_ca=$(echo "$GB_OUT" | grep -oE "our CA fingerprint [^ ,;]+" | head -1 | awk '{print $4}')

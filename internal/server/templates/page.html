@@ -272,15 +272,25 @@
   {{if not .Sel}}
   <div class="hero">
     <img class="hero-mark" src="/static/emblem.svg" alt="" width="72" height="72">
-    <div><h1>Federation</h1><p>Peer our goatnet with a host nation's. Each side runs the same fourteen phases; people decide what flows and confirm each other's codes. Everything else is a Run button.</p></div>
+    <div><h1>Federation</h1><p>Federate our goatnet with another nation's. You decide who the partner is and what they get, confirm the keys with them on a call, and approve what our core admits. goatbuilder does, checks and records the rest.</p></div>
   </div>
   {{end}}
+  <section class="card before">
+    <h2>Before you start, settle these with them</h2>
+    <ul class="plain">
+      <li><strong>Two certificate authorities.</strong> Each side runs its own.</li>
+      <li><strong>Who listens.</strong> One edge accepts inbound UDP on one port, directly or through a forwarder. The other only dials out.</li>
+      <li><strong>One directory.</strong> Both sides publish to the same peering directory (saltlick).</li>
+      <li><strong>What flows, in writing.</strong> Which release sets, in which direction. That is the decision; the rest is mechanical.</li>
+      <li><strong>They run the same steps</strong> on their side, and can join a call for the two read-backs.</li>
+    </ul>
+  </section>
   <h2 class="section-title">{{if .Sel}}Start another peering{{else}}Start a new peering{{end}}</h2>
   <form class="card new-form" method="post" action="/peerings">
     <label>Their code<input name="them" required pattern="[a-z0-9][a-z0-9\-]{1,15}" placeholder="can" autocomplete="off" spellcheck="false"><small>Usually the ISO alpha-3 country code, lower case (can, usa). Codes that aren\'t countries (uk1) show their code instead of a flag.</small></label>
     <label>Name<input name="name" placeholder="Canada" maxlength="80"></label>
-    <label>Who listens?<select name="listen"><option value="us">We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them">They do (we dial them)</option></select><small>One side accepts inbound UDP. A partner with a public address listens; if both are behind NAT, we listen through our forwarder.</small></label>
-    <div class="form-actions"><button class="btn primary" type="submit">Engage</button></div>
+    <label>Who listens?<select name="listen"><option value="us">We do (they dial {{if $.PublicName}}{{$.PublicName}}{{else}}our forwarder{{end}})</option><option value="them">They do (we dial them)</option></select><small>A partner with a public address listens. If they have none, we listen through our forwarder and they dial {{if $.PublicName}}{{$.PublicName}}{{else}}it{{end}}. Their side must say the opposite.</small></label>
+    <div class="form-actions"><button class="btn primary" type="submit">Start</button></div>
   </form>
 </section>
 {{end}}

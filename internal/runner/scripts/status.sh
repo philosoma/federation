@@ -43,8 +43,10 @@ if not os.path.exists(sp):
 text = open(sp).read() if os.path.exists(sp) else ""
 ends = {m.group(1).lower(): (m.group(2), m.group(3)) for m in re.finditer(r"^#\s+([A-Z0-9][A-Z0-9-]{1,15})\s+(sha256:[0-9a-f]+)[^\n]*?through (\d{4}-\d{2}-\d{2})", text, re.M)}
 for them in re.findall(r"^\s*- sovereign:\s*([a-z0-9-]+)", text, re.M):
-    ev = os.path.join(cfg, "ops/ansible/group_vars", f"{them}_edge", "vars.yml")
-    m = re.search(r"^peering_wg_interface:\s*(\S+)", open(ev).read(), re.M) if os.path.exists(ev) else None
+    m = None
+    for name in ("peering-values.yml", "vars.yml"):  # goatbuilder's rendered values, else a hand-written half
+        ev = os.path.join(cfg, "ops/ansible/group_vars", f"{them}_edge", name)
+        m = m or (re.search(r"^peering_wg_interface:\s*\"?([A-Za-z0-9_-]+)", open(ev).read(), re.M) if os.path.exists(ev) else None)
     digest, end = ends.get(them, ("", ""))
     print(them, m.group(1) if m else "wg-fed0", digest or "-", end or "-")
 PY

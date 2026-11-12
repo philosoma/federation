@@ -1,6 +1,5 @@
 /federation
 /data/
-/goatcore-src.tar.gz
 *.env
 .env
 *.key

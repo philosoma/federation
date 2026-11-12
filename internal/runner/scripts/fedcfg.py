@@ -64,11 +64,14 @@ def gb_declare(a):
     if re.search(rf"^- with: {re.escape(a.them)}\s*$", gb, re.M):
         print(f"{a.them} is already declared")
         return
-    entry = f"- with: {a.them}\n  environment: {a.gb_environment}\n  site: {a.gb_site}\n  edge_class: edge\n  tunnel: wireguard\n"
+    # deployment: hand, because the rendered half turns SPIRE federation on;
+    # gb-halves writes the hand half. federation.toml is rendered from what we
+    # offer and the allocated values. cert_dir is Federation's work directory.
+    entry = (f"- with: {a.them}\n  environment: {a.gb_environment}\n  site: {a.gb_site}\n  edge_class: edge\n  tunnel: wireguard\n"
+             "  deployment: hand\n  federation_toml: rendered\n")
     if a.forwarder:
-        entry += f"  forwarder:\n    endpoint: {a.forwarder}\n"
-        if a.forwarder_group:
-            entry += f"    group: {a.forwarder_group}\n"
+        entry += f"  forwarder: {{endpoint: {a.forwarder}}}\n"
+    entry += f"  values: {{cert_dir: {a.cert_dir}}}\n"
     if re.search(r"^peerings:\s*$", gb, re.M):
         gb = gb.rstrip("\n") + "\n" + entry
     else:
@@ -101,6 +104,94 @@ def gb_reads(a):
     print(f"{them}: reads {', '.join(reads)} ({os.path.basename(sp_p)})")
 
 
+def gb_inventory(a):
+    """The peering's two groups in the hand inventory goatbuilder reads. Each
+    peering gets its own inventory names for the same two machines: a host that
+    sat in two peerings' groups would take both peerings' variables."""
+    path = os.path.join(a.repo, "ops/ansible/inventory/peering-edges.ini")
+    inv = read(path) if os.path.exists(path) else ""
+    them = a.them
+    if re.search(rf"^\[{re.escape(them)}_edge\]", inv, re.M):
+        print(f"{them}'s groups are already in the inventory")
+        return
+    block = (
+        f"# {them.upper()} peering (Federation).\n"
+        f"[{them}_edge]\n{a.edge_name}-{them} ansible_host={a.edge_host} ansible_user={a.edge_user} ansible_python_interpreter=/usr/bin/python3\n\n"
+        f"[{them}_core]\n{a.core_name}-{them} ansible_host={a.core_host} ansible_user={a.core_user} ansible_python_interpreter=/usr/bin/python3\n\n"
+    )
+    for group, member in (("peering_edges", f"{them}_edge"), ("peering_cores", f"{them}_core")):
+        head = f"[{group}:children]"
+        if head in inv:
+            inv = inv.replace(head, head + "\n" + member, 1)
+        else:
+            inv = inv.rstrip("\n") + f"\n\n{head}\n{member}\n"
+    # Before the first :children section, so host groups stay together.
+    m = re.search(r"^\[peering_edges:children\]", inv, re.M)
+    inv = inv[: m.start()] + block + inv[m.start():]
+    write(path, inv)
+    print(f"added {them}_edge and {them}_core to the inventory")
+
+
+def site_value(repo, site, key):
+    """A value from the core group's federation-site.yml, as written there."""
+    f = os.path.join(repo, "ops/ansible/group_vars", f"{site.replace('-', '_')}_hosts", "federation-site.yml")
+    m = re.search(rf"^{key}:\s*(.+)$", read(f), re.M) if os.path.exists(f) else None
+    if not m:
+        sys.exit(f"{key} isn't set in group_vars/{site}_hosts/federation-site.yml: add it (see the README)")
+    return m.group(1).strip()
+
+
+def gb_halves(a):
+    """The hand half of each side: what goatbuilder's allocate doesn't render.
+    Idempotent: only keys that are missing are added, so a half written before
+    is completed, never rewritten."""
+    them, d = a.them, f"/etc/goat-zenoh-edge-{a.them}/tls"
+    edge = [
+        ("peering_wg_fips_required", "true"),
+        ("peering_wg_fips_waived_reason", q(a.waiver)),
+        ("peering_spire_enabled", "false   # our SPIRE federation is off (phase 13 reports NOT DONE)"),
+        ("peering_spire_server_host", f"{a.core_name}   # unused while SPIRE is off; delegate_to is evaluated before `when`"),
+        ("goat_zenoh_edge_image", site_value(a.repo, a.site, "goat_zenoh_edge_image")),
+        ("goat_zenoh_edge_trust_mode", "fragment"),
+        ("goat_zenoh_edge_partner_ca_path", f"{d}/partner-ca.pem   # {them.upper()}'s CA only, never a core trust file"),
+        ("goat_zenoh_edge_our_ca_path", f"{d}/our-ca.pem"),
+        ("goat_zenoh_edge_core_endpoints", f"\n  - \"tls/{a.core_host}:7447#root_ca_certificate_file={d}/our-ca.pem\""),
+        ("goat_zenoh_edge_core_interface", "wt0"),
+        ("goat_zenoh_edge_partner_interface", '"{{ peering_wg_interface }}"'),
+        ("goat_zenoh_edge_core_cn", site_value(a.repo, a.site, "goat_zenoh_edge_core_cn")),
+        ("goat_zenoh_edge_install_certs", "true"),
+    ]
+    core = [
+        ("goat_fed_republisher_image", site_value(a.repo, a.site, "goat_fed_republisher_image")),
+        ("goat_fed_republisher_core_endpoint", f"\"tls/{a.core_host}:7447\""),
+        ("goat_fed_republisher_core_ca_src", f"\"{{{{ playbook_dir }}}}/../enrollment/ca/{a.site}/root-cert.pem\""),
+    ]
+    for half, keys in (("edge", edge), ("core", core)):
+        path = os.path.join(a.repo, "ops/ansible/group_vars", f"{them}_{half}", "vars.yml")
+        s = read(path) if os.path.exists(path) else (
+            f"# {them.upper()} peering, {half} half. Written by Federation. Interface, ports and\n"
+            "# certificate paths are in peering-values.yml (goatbuilder federate allocate).\n")
+        added = []
+        for k, v in keys:
+            if not re.search(rf"^{k}:", s, re.M):
+                s = s.rstrip("\n") + f"\n{k}: {v}".replace(": \n", ":\n") + "\n"
+                added.append(k)
+        write(path, s)
+        print(f"{them}_{half}: " + (f"added {', '.join(added)}" if added else "complete"))
+
+
+def endpoint(a):
+    """The address the partner dials when we listen, from the rendered
+    federation.toml. Prints nothing when we don't listen."""
+    import glob
+    for f in glob.glob(os.path.join(a.repo, "ops/federation/*/peerings", a.them, "federation.toml")):
+        t = read(f)
+        m = re.search(r'^endpoint\s*=\s*"([^"]+)"', t, re.M)
+        if m and re.search(r"^listener\s*=\s*true", t, re.M):
+            print(m.group(1))
+        return
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -108,7 +199,16 @@ def main():
     for k in ("repo", "them", "gb-environment", "gb-site"):
         p.add_argument("--" + k, required=True)
     p.add_argument("--forwarder", default="")
-    p.add_argument("--forwarder-group", default="")
+    p.add_argument("--cert-dir", required=True)
+    p = sub.add_parser("gb-inventory")
+    for k in ("repo", "them", "edge-name", "edge-host", "edge-user", "core-name", "core-host", "core-user"):
+        p.add_argument("--" + k, required=True)
+    p = sub.add_parser("gb-halves")
+    for k in ("repo", "them", "site", "core-name", "core-host", "waiver"):
+        p.add_argument("--" + k, required=True)
+    p = sub.add_parser("endpoint")
+    for k in ("repo", "them"):
+        p.add_argument("--" + k, required=True)
     p = sub.add_parser("gb-reads")
     for k in ("repo", "them", "us", "site"):
         p.add_argument("--" + k, required=True)
@@ -116,7 +216,8 @@ def main():
     a = ap.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,15}", a.them):
         sys.exit("bad sovereign id")
-    {"gb-declare": gb_declare, "gb-reads": gb_reads}[a.cmd](a)
+    {"gb-declare": gb_declare, "gb-reads": gb_reads, "gb-inventory": gb_inventory, "gb-halves": gb_halves,
+     "endpoint": endpoint}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -1,25 +1,9 @@
 # syntax=docker/dockerfile:1.7
-# Federation runs the peering driver from the core host, so the image carries
-# what the operator laptop had: goat and goatbuilder (built from the patched
-# goatcore in the build context), Ansible with its collections, the AWS SSM
-# plugin, git, ssh and the docker client.
+# Federation runs goatbuilder federate from the core host, so the image carries
+# what an operator's machine would: goatbuilder (the released binary), Ansible
+# with its collections, the AWS SSM plugin, git, ssh and the docker client.
 #
-# Build on the core (arm64), from a context holding this repo plus
-# goatcore-src.tar.gz: `git archive` of goatcore 4b89370, which is PR #279
-# (`init --over-ssh`) plus our SPIRE trust-domain fix (#247):
-#   docker build -t federation:<rev> .
-
-FROM rust:1.99-slim-trixie AS goat
-RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
-WORKDIR /src/goatcore
-COPY goatcore-src.tar.gz /tmp/
-RUN tar xzf /tmp/goatcore-src.tar.gz -C /src/goatcore && rm /tmp/goatcore-src.tar.gz
-WORKDIR /src/goatcore/crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/goatcore/crates/target \
-    cargo build --release --locked -p goat-cli -p goatbuilder \
-    && install -m0755 target/release/goat /usr/local/bin/goat \
-    && install -m0755 target/release/goatbuilder /usr/local/bin/goatbuilder-legacy
+#   docker build --build-arg VERSION=$(git rev-parse --short HEAD) -t federation:dev .
 
 FROM golang:1.26-trixie AS app
 ARG VERSION=dev
@@ -50,18 +34,16 @@ RUN arch=$([ "$TARGETARCH" = arm64 ] && echo arm64 || echo 64bit) \
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 # Preflight requires compose (the edge role deploys with `docker compose`).
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
-# The patched goat and goatbuilder drive the peerings set up before goatbuilder 0.5
-# (Canada, Estonia): `goat federate` until it's removed (about 2026-12-11).
-COPY --from=goat /usr/local/bin/goat /usr/local/bin/goatbuilder-legacy /usr/local/bin/
-# The released goatbuilder drives new peerings (`goatbuilder federate`). The digest
-# is SHA256SUMS of the release, whose keyless cosign signature by goatcore's release
-# workflow was verified when this was pinned.
+# goatbuilder federate does the federation. The digests are from the release's
+# SHA256SUMS, whose keyless cosign signature by goatcore's release workflow was
+# verified when they were pinned here.
 ARG GOATBUILDER_VERSION=0.5.1
 ARG GOATBUILDER_SHA256_ARM64=9c53d576dc0ce5eb5eb30a01fc28d3f607c35c975553d3187e9f3bd8d2b36d48
-RUN [ "$TARGETARCH" = arm64 ] || { echo "goatbuilder is pinned for arm64 only; add the $TARGETARCH digest" >&2; exit 1; } \
+ARG GOATBUILDER_SHA256_AMD64=cce77bed0e0237cb3d7e07f8ce3fc66297c2aa0d32cee0e8168bcbeb23ccdbd2
+RUN case "$TARGETARCH" in arm64) sum=$GOATBUILDER_SHA256_ARM64 ;; amd64) sum=$GOATBUILDER_SHA256_AMD64 ;; *) echo "no goatbuilder digest pinned for $TARGETARCH" >&2; exit 1 ;; esac \
     && curl -fsSL -o /usr/local/bin/goatbuilder \
-         "https://github.com/USAREUR-AF/goatcore/releases/download/goatbuilder/v${GOATBUILDER_VERSION}/goatbuilder-linux-arm64" \
-    && echo "${GOATBUILDER_SHA256_ARM64}  /usr/local/bin/goatbuilder" | sha256sum -c - \
+         "https://github.com/USAREUR-AF/goatcore/releases/download/goatbuilder/v${GOATBUILDER_VERSION}/goatbuilder-linux-${TARGETARCH}" \
+    && echo "$sum  /usr/local/bin/goatbuilder" | sha256sum -c - \
     && chmod 0755 /usr/local/bin/goatbuilder \
     && goatbuilder --version
 COPY --from=app /out/federation /app/federation
