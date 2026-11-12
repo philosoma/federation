@@ -84,9 +84,11 @@ In the config overlay:
   `[transport] measured_mtu`).
 - `ops/goatbuilder/goatbuilder.yaml`: `environments[].peering_directory.url`.
   The app adds each `peerings:` entry itself.
-- `group_vars/<site>_hosts/federation-site.yml`: `goat_zenoh_edge_image`,
-  `goat_zenoh_edge_core_cn`, `goat_fed_republisher_image`,
-  `goat_fed_republisher_core_endpoint`, `peering_spire_server_addr`.
+- `group_vars/<site>_hosts/federation-site.yml`: `goat_zenoh_edge_core_cn`,
+  `goat_fed_republisher_core_endpoint`, `peering_spire_server_addr`. The two
+  images (`goat_fed_republisher_image`, `goat_zenoh_edge_image`) are read from
+  your generated pins or an existing peering's half; for a first peering, set
+  them there.
 - `group_vars/<site>_hosts/peerings.yml` for `zenoh_sovereign_peerings`:
   goatbuilder's admission refuses any other file (GB-237).
 

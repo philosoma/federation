@@ -70,11 +70,21 @@
     group: "{{ federation_uid }}"
     mode: "0640"
   no_log: true
+  # Only when the file is on this machine: after the first deploy the node
+  # holds both, and the CA key needn't be decrypted again to redeploy.
+  when: item.src is file
   loop:
     - {src: "{{ federation_signing_seed_src }}", dest: signing.seed}
     - {src: "{{ federation_ca_key_src }}", dest: ca-key.pem}
   loop_control:
     label: "{{ item.dest }}"
+
+- name: federation | the node must hold the signing key and the CA key
+  ansible.builtin.stat:
+    path: "{{ federation_app_secrets_dir }}/{{ item }}"
+  loop: [signing.seed, ca-key.pem]
+  register: federation_operator_files
+  failed_when: not federation_operator_files.stat.exists or federation_operator_files.stat.size == 0
 
 - name: federation | the goat operator profile
   ansible.builtin.copy:

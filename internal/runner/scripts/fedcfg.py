@@ -133,12 +133,19 @@ def gb_inventory(a):
 
 
 def site_value(repo, site, key):
-    """A value from the core group's federation-site.yml, as written there."""
-    f = os.path.join(repo, "ops/ansible/group_vars", f"{site.replace('-', '_')}_hosts", "federation-site.yml")
-    m = re.search(rf"^{key}:\s*(.+)$", read(f), re.M) if os.path.exists(f) else None
-    if not m:
-        sys.exit(f"{key} isn't set in group_vars/{site}_hosts/federation-site.yml: add it (see the README)")
-    return m.group(1).strip()
+    """A site value as it is written in the config: from the core group's
+    federation-site.yml, else its generated pins.yml (images are governed
+    pins), else another peering's half (the edge router's image lives there)."""
+    import glob
+    gv = os.path.join(repo, "ops/ansible/group_vars")
+    core = os.path.join(gv, f"{site.replace('-', '_')}_hosts")
+    files = [os.path.join(core, "federation-site.yml"), os.path.join(core, "pins.yml")]
+    files += sorted(glob.glob(os.path.join(gv, "*_edge", "vars.yml")) + glob.glob(os.path.join(gv, "*_core", "vars.yml")))
+    for f in files:
+        m = re.search(rf"^{key}:\s*(.+)$", read(f), re.M) if os.path.exists(f) else None
+        if m:
+            return m.group(1).strip()
+    sys.exit(f"{key} isn't set anywhere in the config: add it to group_vars/{site}_hosts/federation-site.yml (see the README)")
 
 
 def gb_halves(a):
