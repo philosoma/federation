@@ -260,13 +260,16 @@ explain_from() {
 	[ -n "$code" ] || return 0
 	{ echo "$code"; goatbuilder explain "$code" --color never 2>/dev/null || true; } >"$W/${FED_PHASE:-step}.explain"
 }
-# gb_run: goatbuilder federate, output kept in $GB_OUT and printed. Returns
-# goatbuilder's exit code without stopping the script.
+# gb_run: goatbuilder federate, its output streamed to the log as it runs (so
+# the page shows progress) and kept in $GB_OUT. Returns goatbuilder's exit code
+# without stopping the script.
 gb_run() {
-	local rc=0
-	GB_OUT=$(gb "$@" 2>&1) || rc=$?
-	echo "$GB_OUT"
-	return $rc
+	local rc f
+	f=$(mktemp "$W/.gb-out.XXXXXX")
+	gb "$@" 2>&1 | tee "$f" && rc=0 || rc=${PIPESTATUS[0]}
+	GB_OUT=$(cat "$f")
+	rm -f "$f"
+	return "$rc"
 }
 # gb_die: stop with a message, keeping goatbuilder's explanation of the code.
 gb_die() { explain_from "${GB_OUT:-}"; die "$@"; }
