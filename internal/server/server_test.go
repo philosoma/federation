@@ -285,3 +285,18 @@ func TestStatusPage(t *testing.T) {
 		t.Fatalf("status page:\n%s", body)
 	}
 }
+
+func TestWaitingOnThem(t *testing.T) {
+	h, st, _ := newTest(t, nil)
+	do(h, "POST", "/peerings", url.Values{"them": {"lva"}, "name": {"Latvia"}, "listen": {"them"}}, nil)
+	st.Update("lva", func(p *store.Peering) error {
+		p.Run("ready").Status = store.StatusPassed
+		p.Run("g1").Status = store.StatusPassed
+		*p.Run("g2") = store.Run{Status: store.StatusWaiting, Exit: runner.ExitWaiting, Note: "not yet"}
+		return nil
+	})
+	body := do(h, "GET", "/setup?n=lva", nil, nil).Body.String()
+	if !strings.Contains(body, "Waiting for them") || strings.Contains(body, "Confirm and continue") {
+		t.Fatal("a step waiting on the partner should say so and ask for nothing")
+	}
+}

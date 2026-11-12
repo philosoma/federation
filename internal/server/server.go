@@ -314,6 +314,11 @@ func (s *server) rows(p *store.Peering, busy string) (rows []row, done, total in
 		}
 		rw := row{Phase: ph, Status: run.Status, Note: run.Note, Finished: run.Finished, By: run.By}
 		rw.Chip, rw.StatusText = chip(run.Status)
+		// "Not yet" from a step (their package isn't published, say) is their
+		// move, not ours; a step that ran and wants a confirmation is ours.
+		if run.Status == store.StatusWaiting && run.Exit == runner.ExitWaiting {
+			rw.StatusText = "Waiting for them"
+		}
 		rw.Partner = p.Name
 		rw.Index, rw.ConfirmText, rw.Summary = len(rows)+1, ph.Confirm, run.Outputs["summary"]
 		rw.Done = run.Status == store.StatusPassed
