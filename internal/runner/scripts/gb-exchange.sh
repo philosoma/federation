@@ -21,6 +21,10 @@ if echo "$GB_OUT" | grep -q "GB-192"; then
 	their_ca=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["identity"]["ca_fingerprint"])' "$GBW/theirs.canonical.json" 2>/dev/null) || their_ca=
 	[ -n "$their_ca" ] || waiting "Our package is published. ${FED_NAME:-$THEM}'s isn't on the directory yet: ask them to run their exchange, then run this again."
 	[ -n "$our_key" ] && [ -n "$our_ca" ] || gb_die "goatbuilder stopped for the read-back but didn't print our codes. Open the log."
+	# A package that lacks its transport or data offer composes into an agreement
+	# that federates nothing: say so now, while they're on the call.
+	lacks=$(python3 "$FED_SCRIPTS/offers.py" package "$GBW/theirs.canonical.json" "${FED_NAME:-$THEM}" | tr '\n' ' ') || lacks=
+	[ -n "$lacks" ] && echo "::note Their package is incomplete. $lacks Ask them to declare [transport] and [data] in their federation.toml and run their exchange again, then run this again."
 	show their_ca "$(groups "${their_ca#sha256:}")"
 	show raw_their_ca "$their_ca"
 	if echo "$GB_OUT" | grep -qE '^ +FAIL '; then echo "::note The compatibility report has a FAIL row: read it in the log before you confirm anything."; fi
