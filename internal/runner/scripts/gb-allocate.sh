@@ -41,7 +41,7 @@ step "goatbuilder federate allocate $THEM: what it would write"
 FED_ALLOCATE_MOVE=$THEM gb_run allocate "$THEM" --dry-run --yes || gb_die "goatbuilder won't allocate this peering. The explanation below says what clashes."
 step "goatbuilder federate allocate $THEM"
 FED_ALLOCATE_MOVE=$THEM gb_run allocate "$THEM" --yes || gb_die "Allocation failed. The log names what to fix."
-vals=$(echo "$GB_OUT" | sed -n "s/^ok *values *[^:]*: //p" | head -1 | sed 's/ certs .*//')
+vals=$(echo "$GB_OUT" | sed -n "s/^ok *values *[^:]*: //p" | head -1 | sed 's/ edge-listen .*//') || vals=
 step "Committing the link's values"
 tree_to_config
 push_config "Allocate the $THEM peering (goatbuilder federate allocate)"

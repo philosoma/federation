@@ -172,6 +172,9 @@ development; the steps need the core's environment.
 - Backout is offered (survey first), but goatbuilder has not run it on real
   hosts.
 - The directory holds one package per party: one exchange at a time.
+- goatbuilder 0.5.1 renders a they-listen peering's `federation.toml` without
+  `endpoint`, which its own phase 3 refuses. The app hands phase 3 a copy with a
+  placeholder until that is fixed upstream.
 - Written against one site's overlay layout.
 
 ## Licence

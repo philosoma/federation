@@ -20,7 +20,7 @@ h=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hash"])' "$
 step "What our core will admit"
 rm -rf "$GBW/admission/review.md"
 rc=0; gb_run deploy "$THEM" --yes --approve-plan "$h" --review-in-pr || rc=$?
-a=$(echo "$GB_OUT" | grep -oE "approve-admission sha256:[0-9a-f]{64}" | head -1 | awk '{print $2}')
+a=$(echo "$GB_OUT" | grep -oE "approve-admission sha256:[0-9a-f]{64}" | head -1 | awk '{print $2}') || a=
 [ -n "$a" ] || a=$(grep -ohE "sha256:[0-9a-f]{64}" "$GBW/admission/review.md" 2>/dev/null | tail -1) || true
 [ -n "$a" ] || gb_die "goatbuilder didn't say what our core will admit (exit $rc). Open the log."
 show raw_plan_hash "$h"

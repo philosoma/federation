@@ -168,6 +168,17 @@ GBW=$FED_STATE/gb/$THEM
 gb() {
 	mkdir -p "$GBW"
 	seed_carrier_keys
+	# goatbuilder 0.5.1 renders a they-listen peering's federation.toml without
+	# `endpoint`, and its own phase 3 then refuses the file ("missing field
+	# endpoint"). Nobody dials us on such a link, so give phase 3 a copy with a
+	# placeholder. A we-listen peering's file has the real address.
+	local decl=$TREE/ops/federation/$FED_GB_ENVIRONMENT/peerings/$THEM/federation.toml port
+	unset FED_DECLARATION
+	if [ -f "$decl" ] && ! grep -q '^endpoint' "$decl"; then
+		port=$(sed -n 's/^peering_wg_listen_port: *//p' "$TREE/ops/ansible/group_vars/${THEM}_edge/peering-values.yml" 2>/dev/null | head -1)
+		sed "/^listener/i endpoint             = \"unset.invalid:${port:-51820}\"" "$decl" >"$GBW/federation.toml"
+		export FED_DECLARATION=$GBW/federation.toml
+	fi
 	(cd "$TREE" && FED_WORK="$GBW" FED_WORK_ROOT="$FED_STATE/gb" \
 		FED_SIGNING_KEY="$SEED" FED_CA_KEY="$CA_KEY" FED_CA_CERT="$(our_ca_cert)" \
 		FED_DIRECTORY_URL="$FED_DIRECTORY_URL" GOAT_PROFILE_DIR="$HOME/.goat" \

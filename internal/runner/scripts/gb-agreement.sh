@@ -9,7 +9,7 @@ sync_repos
 assemble
 step "goatbuilder federate $THEM: phases 5 to 6"
 rc=0; gb_run "$THEM" --yes --partner-key "$FED_THEIR_KEY" --partner-ca-fingerprint "$FED_THEIR_CA" || rc=$?
-d=$(echo "$GB_OUT" | grep -oE "read sha256:[0-9a-f]{64}" | head -1 | sed 's/^read //')
+d=$(echo "$GB_OUT" | grep -oE "read sha256:[0-9a-f]{64}" | head -1 | sed 's/^read //') || d=
 if [ -z "$d" ] && [ -f "$GBW/agreement.json" ] && echo "$GB_OUT" | grep -q "GB-192"; then d="sha256:$(sha256sum "$GBW/agreement.json" | awk '{print $1}')"; fi
 if [ -n "$d" ]; then
 	show digest "$(groups "${d#sha256:}")"
